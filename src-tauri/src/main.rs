@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex as TokioMutex;
 
 /// Managed sidecar handle shared across commands (async mutex — blocking RPC).
-type SharedSidecar = Arc<TokioMutex<Sidecar>>;
+type SharedSidecar = Arc<TokioMutex<Option<Sidecar>>>;
 
 /// Managed state: a gateway index for the active session. `Arc<Mutex<_>>`
 /// lets tasks move an owned handle into blocking threads (never borrow `State`).
@@ -315,10 +315,14 @@ async fn sidecar_list_partitions(
     sidecar: State<'_, SharedSidecar>,
     image_path: String,
 ) -> Result<serde_json::Value, String> {
-    let mut sc = sidecar.lock().await;
-    sc.list_partitions(&image_path)
-        .await
-        .map_err(|e| e.to_string())
+    let mut guard = sidecar.lock().await;
+    if let Some(ref mut sc) = *guard {
+        sc.list_partitions(&image_path)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Err("Forensic sidecar is not available (Python/sidecar missing)".into())
+    }
 }
 
 /// Render a thumbnail for a carved image at a byte offset.
@@ -329,10 +333,14 @@ async fn sidecar_thumbnail(
     offset: u64,
     out_path: String,
 ) -> Result<serde_json::Value, String> {
-    let mut sc = sidecar.lock().await;
-    sc.carve_thumbnail(&image_path, offset, &out_path)
-        .await
-        .map_err(|e| e.to_string())
+    let mut guard = sidecar.lock().await;
+    if let Some(ref mut sc) = *guard {
+        sc.carve_thumbnail(&image_path, offset, &out_path)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Err("Forensic sidecar is not available (Python/sidecar missing)".into())
+    }
 }
 
 /// Integrity Gate: strict structural check for carved files.
@@ -366,6 +374,42 @@ async fn verify_carved_file(app: AppHandle, path: String) -> Result<bool, String
 #[tauri::command]
 fn get_temp_dir() -> String {
     std::env::temp_dir().to_string_lossy().to_string()
+}
+
+/// Native Windows file picker dialog for forensic disk images (.dd, .img, .raw, .E01).
+#[tauri::command]
+async fn select_image_file() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let script = r#"
+            Add-Type -AssemblyName System.Windows.Forms
+            $f = New-Object System.Windows.Forms.OpenFileDialog
+            $f.Filter = "Disk Images (*.dd;*.img;*.raw;*.E01)|*.dd;*.img;*.raw;*.E01|All Files (*.*)|*.*"
+            if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                Write-Output $f.FileName
+            }
+            "#;
+            let output = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", script])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output()
+                .map_err(|e| e.to_string())?;
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if path.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(path))
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn main() {
@@ -404,10 +448,14 @@ fn main() {
     // Problem #3 fix: Python executable detection (Windows vs Unix)
     let python_cmd = if cfg!(windows) { "python" } else { "python3" };
 
-    let sidecar = tauri::async_runtime::block_on(async {
-        Sidecar::spawn(python_cmd, sidecar_path.to_str().unwrap())
-            .await
-            .expect("failed to spawn sidecar")
+    let sidecar: Option<Sidecar> = tauri::async_runtime::block_on(async {
+        match Sidecar::spawn(python_cmd, sidecar_path.to_str().unwrap()).await {
+            Ok(s) => Some(s),
+            Err(e) => {
+                eprintln!("[WARN] Forensic sidecar unavailable: {}. Running without sidecar.", e);
+                None
+            }
+        }
     });
 
     tauri::Builder::default()
@@ -426,7 +474,8 @@ fn main() {
             verify_carved_file,
             sidecar_list_partitions,
             sidecar_thumbnail,
-            get_temp_dir
+            get_temp_dir,
+            select_image_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClockVerse");

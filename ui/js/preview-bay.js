@@ -4,6 +4,9 @@ import { invoke } from './event-stream.js';
 
 export class PreviewBay {
   constructor(container) {
+    this.container = container;
+    this.files = [];
+    this.currentImage = null;
     this._tempDir = null;
   }
 
@@ -16,10 +19,6 @@ export class PreviewBay {
       }
     } catch (_) {}
     return '/tmp/';
-  }
-    this.container = container;
-    this.files = [];
-    this.currentImage = null;
   }
 
   async loadFromImage(imagePath) {
@@ -70,21 +69,23 @@ export class PreviewBay {
     this.container.innerHTML = `<div class="constellation__empty"><span>${msg}</span></div>`;
   }
 
-  observeThumbs() {
+  async observeThumbs() {
     if (!this.currentImage) return;
+    const tempDir = await this.getTempDir();
+    const sep = tempDir.includes('\\') ? '\\' : '/';
     const io = new IntersectionObserver(async (entries) => {
       for (const e of entries) {
         if (!e.isIntersecting) continue;
         io.unobserve(e.target);
         const offset = e.target.dataset.offset;
-        const tempDir = await this.getTempDir();
-        const sep = tempDir.includes('\\') ? '\\' : '/';
         const out = `${tempDir}${sep}thumb_${offset}.png`;
         try {
           const res = await invoke('sidecar_thumbnail', {
-            imagePath: this.currentImage, offset: parseInt(offset, 10), outPath: out
+            imagePath: this.currentImage,
+            offset: parseInt(offset, 10),
+            outPath: out
           });
-          if (res?.status === 'ok') {
+          if (res?.status === 'ok' || res?.thumbnail) {
             e.target.innerHTML = `<img src="file://${out}" alt="">`;
           } else {
             e.target.textContent = '📄';

@@ -112,13 +112,41 @@ const browseBtn = document.getElementById('btn-browse');
 const imageInput = document.getElementById('image-file-input');
 const selectedFileLabel = document.getElementById('selected-file');
 
-if (browseBtn && imageInput) {
-  browseBtn.addEventListener('click', () => imageInput.click());
+if (browseBtn) {
+  browseBtn.addEventListener('click', async () => {
+    let filePath = null;
+    if (typeof window.__TAURI__ !== 'undefined') {
+      try {
+        if (window.__TAURI__.dialog?.open) {
+          filePath = await window.__TAURI__.dialog.open({
+            filters: [{ name: 'Disk Images', extensions: ['dd', 'img', 'raw', 'E01'] }]
+          });
+        } else {
+          filePath = await invoke('select_image_file');
+        }
+      } catch (_) {
+        filePath = await invoke('select_image_file');
+      }
+    }
+
+    if (filePath) {
+      if (Array.isArray(filePath)) filePath = filePath[0];
+      window.selectedImagePath = filePath;
+      if (selectedFileLabel) selectedFileLabel.textContent = `Selected: ${filePath}`;
+    } else if (imageInput) {
+      // Browser dev fallback
+      imageInput.click();
+    }
+  });
+}
+
+if (imageInput) {
   imageInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
-      selectedFileLabel.textContent = `Selected: ${file.name}`;
-      window.selectedImagePath = file.path || file.name;
+      const fullPath = file.path || file.name;
+      window.selectedImagePath = fullPath;
+      if (selectedFileLabel) selectedFileLabel.textContent = `Selected: ${file.name}`;
     }
   });
 }
