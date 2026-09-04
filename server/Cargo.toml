@@ -1,0 +1,19 @@
+[package]
+name = "clockverse-license"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ed25519-dalek = "2"
+rand = "0.8"
+hex = "0.4"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

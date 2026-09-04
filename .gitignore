@@ -1,0 +1,35 @@
+# Build Artifacts
+target/
+node_modules/
+dist/
+build/
+
+# Logs & Environment
+*.log
+.env
+.env.*
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+# Forensic Images, Sparse Disks & Test Databases
+*.img
+*.raw
+*.dd
+*.E01
+*.db
+*.sqlite
+*.sqlite3
+soak.db
+big.img
+
+# Git Backup Bundles
+*.bundle
+
+# Python Sidecar Cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+

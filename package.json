@@ -1,0 +1,19 @@
+{
+  "name": "clockverse-pro",
+  "version": "0.1.0",
+  "description": "ClockVerse: $100 Tier Luxury Forensic Reconstruction Engine & Obsidian Hologram Deck",
+  "scripts": {
+    "dev": "npx serve ui -l 5173",
+    "serve": "npx serve ui -l 5173",
+    "test:sidecar": "python sidecar/test_sidecar.py",
+    "test:engine": "cargo test -p clockverse-engine",
+    "test:server": "cargo test -p clockverse-license",
+    "test": "npm run test:sidecar && npm run test:engine && npm run test:server"
+  },
+  "dependencies": {
+    "three": "^0.185.0"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}
