@@ -1,3 +1,5 @@
+// In-memory mock folders for browser dev
+const mockCapsuleFolders = [];
 // Tauri event bridge. In browser-dev mode, falls back to a mock feed
 // so UI work never blocks on the Rust engine.
 const isTauri = typeof window.__TAURI__ !== 'undefined';
@@ -123,6 +125,32 @@ export async function invoke(cmd, args) {
 
     if (cmd === 'get_temp_dir') {
     return '/tmp/';
+  }
+
+  
+  if (cmd === 'time_capsule_list') {
+    return mockCapsuleFolders;
+  }
+  if (cmd === 'time_capsule_protect') {
+    const f = {
+      path: args.path,
+      name: args.name || args.path.split(/[\/]/).pop(),
+      added_at: Date.now() * 1000,
+      last_snapshot: Date.now() * 1000,
+      file_count: 12,
+      total_bytes: 1024 * 1024 * 5,
+      status: 'Active'
+    };
+    mockCapsuleFolders.push(f);
+    return f;
+  }
+  if (cmd === 'time_capsule_snapshot') {
+    const found = mockCapsuleFolders.find(f => f.path === args.folderPath);
+    if (found) found.last_snapshot = Date.now() * 1000;
+    return Date.now() * 1000;
+  }
+  if (cmd === 'select_folder') {
+    return 'D:\\Projects\\ClockVerse';
   }
 
   if (cmd === 'select_image_file') {

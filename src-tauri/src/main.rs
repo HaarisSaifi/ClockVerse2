@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use clockverse_engine::index::EventIndex;
+use clockverse_engine::timesnap::{CapsuleStatus, ProtectedFolder, TimeCapsule};
 use clockverse_engine::sidecar::Sidecar;
 use clockverse_engine::{
     chrono::StreamStitch, ntfs, ntfs_extract, partition, sectorforge, EngineEvent,
@@ -19,6 +20,7 @@ type SharedSidecar = Arc<TokioMutex<Option<Sidecar>>>;
 /// lets tasks move an owned handle into blocking threads (never borrow `State`).
 struct AppState {
     index: Arc<StdMutex<EventIndex>>,
+    time_capsule: Arc<StdMutex<TimeCapsule>>,
 }
 
 #[tauri::command]
@@ -412,6 +414,68 @@ async fn select_image_file() -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
+
+#[tauri::command]
+async fn time_capsule_protect(
+    state: State<'_, AppState>,
+    path: String,
+    name: String,
+) -> Result<ProtectedFolder, String> {
+    let mut capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
+    capsule.protect_folder(path, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn time_capsule_snapshot(
+    state: State<'_, AppState>,
+    folder_path: String,
+) -> Result<u64, String> {
+    let mut capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
+    let snap = capsule.snapshot_folder(&folder_path).map_err(|e| e.to_string())?;
+    Ok(snap.created_at)
+}
+
+#[tauri::command]
+async fn time_capsule_list(state: State<'_, AppState>) -> Result<Vec<ProtectedFolder>, String> {
+    let capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
+    Ok(capsule.folders.clone())
+}
+
+#[tauri::command]
+async fn select_folder() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let script = r#"
+            Add-Type -AssemblyName System.Windows.Forms
+            $f = New-Object System.Windows.Forms.FolderBrowserDialog
+            $f.Description = "Select Folder to Protect with Time Capsule"
+            if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                Write-Output $f.SelectedPath
+            }
+            "#;
+            let output = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", script])
+                .creation_flags(0x08000000) // CREATE_NO_WINDOW
+                .output()
+                .map_err(|e| e.to_string())?;
+            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if path.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(path))
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(None)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn main() {
     // Problem #1 fix: Persistent DB with env override for tests
     let db_path = std::env::var("CLOCKVERSE_DB")
@@ -458,9 +522,41 @@ fn main() {
         }
     });
 
+    let time_capsule = Arc::new(StdMutex::new(TimeCapsule::new()));
+
+    // Background Time Capsule Auto-Snapshot Daemon (Runs every 10 minutes)
+    let capsule_daemon = Arc::clone(&time_capsule);
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600));
+        loop {
+            interval.tick().await;
+            let active_folders: Vec<String> = {
+                if let Ok(c) = capsule_daemon.lock() {
+                    c.folders.iter()
+                        .filter(|f| f.status == CapsuleStatus::Active)
+                        .map(|f| f.path.clone())
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            };
+
+            for folder in active_folders {
+                if let Ok(mut c) = capsule_daemon.lock() {
+                    if let Err(e) = c.snapshot_folder(&folder) {
+                        eprintln!("[TimeCapsule] Background snapshot error for {}: {}", folder, e);
+                    } else {
+                        println!("[TimeCapsule] Auto-snapshot completed for {}", folder);
+                    }
+                }
+            }
+        }
+    });
+
     tauri::Builder::default()
         .manage(AppState {
             index: Arc::new(StdMutex::new(index)),
+            time_capsule: Arc::clone(&time_capsule),
         })
         .manage(Arc::new(TokioMutex::new(sidecar)) as SharedSidecar)
         .invoke_handler(tauri::generate_handler![
@@ -475,7 +571,11 @@ fn main() {
             sidecar_list_partitions,
             sidecar_thumbnail,
             get_temp_dir,
-            select_image_file
+            select_image_file,
+            time_capsule_protect,
+            time_capsule_snapshot,
+            time_capsule_list,
+            select_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClockVerse");

@@ -7,6 +7,7 @@ pub mod ntfs_extract;
 pub mod partition;
 pub mod sectorforge;
 pub mod sidecar;
+pub mod timesnap;
 
 use serde::{Deserialize, Serialize};
 

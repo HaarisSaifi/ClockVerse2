@@ -410,16 +410,19 @@ version = "0.1.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
+ "dirs 5.0.1",
  "memmap2",
  "rayon",
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

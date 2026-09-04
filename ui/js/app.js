@@ -1,3 +1,4 @@
+import { TimeCapsuleUI } from './time-capsule.js';
 import { HoloCore } from './holo-core.js';
 import { ModeController } from './mode-controller.js';
 import { PreviewBay } from './preview-bay.js';
@@ -335,6 +336,14 @@ if (typeof window.__TAURI__ === 'undefined') {
       ingestFile(new File([mockFile], 'session.log', { type: 'text/plain' }));
     }, 1200);
   }, 600);
+}
+
+
+// Initialize Time Capsule Insurance Engine
+const timeCapsuleContainer = document.getElementById('time-capsule-container');
+if (timeCapsuleContainer) {
+  window.timeCapsule = new TimeCapsuleUI(timeCapsuleContainer);
+  window.timeCapsule.refresh();
 }
 
 export {};
