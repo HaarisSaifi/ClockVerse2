@@ -70,10 +70,7 @@ function handleEngineEvent(e) {
     case 'file_verified':
       logLine(`✓ VERIFIED path=${e.path} sha256=${e.sha256.slice(0, 16)}...`);
       break;
-    case 'file_restored':
-      counter.textContent = ++restored;             // count-up on real write confirm
-      logLine(`★ RESTORED path=${e.path} (${e.bytes} bytes)`);
-      break;
+
     case 'scan_complete':
       logLine(`✓ COMPLETE found=${e.found} verified=${e.verified} failures=${e.failures}`);
       // Preview Bay: load recovered files once the scan finishes.

@@ -1,3 +1,8 @@
+
+:root {
+  --text-dim: #64748b;
+  --accent-danger: #ff3366;
+}
 /* ClockVerse: Obsidian Hologram Card System & Layout */
 
 @property --angle {
@@ -257,29 +262,21 @@ body[data-mode="sector"] .toggle-orb {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 12px;
+  padding: 40px;
+  color: var(--text-dim, #64748b);
   min-height: 220px;
-  color: #64748b;
-  font-family: var(--font-mono);
-  font-size: 13px;
+  justify-content: center;
   text-align: center;
-  padding: 24px;
-}
-
-.constellation__empty .dim {
-  font-size: 12px;
-  color: #475569;
-  max-width: 280px;
 }
 
 .constellation__empty-ring {
   width: 48px;
   height: 48px;
+  border: 2px solid var(--accent-prism, #00f2fe);
   border-radius: 50%;
-  border: 2px dashed var(--accent-active-dim);
-  animation: rotate-border 8s linear infinite;
-  opacity: 0.5;
+  opacity: 0.3;
+  animation: pulse 2s infinite;
 }
 
 .constellation__grid {
@@ -296,12 +293,10 @@ body[data-mode="sector"] .toggle-orb {
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  animation: slideIn 0.3s ease forwards;
   opacity: 0;
-  transform: translateX(-10px);
-  animation: constellation-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  border-radius: 6px;
 }
 
 .constellation__row:hover {
@@ -309,19 +304,29 @@ body[data-mode="sector"] .toggle-orb {
 }
 
 .constellation__dot {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
-  box-shadow: 0 0 8px currentColor;
 }
 
-.constellation__dot--write  { background: #8b5cf6; color: #8b5cf6; }
-.constellation__dot--patch  { background: #22e6c8; color: #22e6c8; }
-.constellation__dot--delete { background: #ff4d6a; color: #ff4d6a; }
+.constellation__dot--write {
+  background: var(--accent-plasma, #ff5e3a);
+  box-shadow: 0 0 8px var(--accent-plasma, #ff5e3a);
+}
+
+.constellation__dot--patch {
+  background: var(--accent-solar, #f6d365);
+  box-shadow: 0 0 8px var(--accent-solar, #f6d365);
+}
+
+.constellation__dot--delete {
+  background: var(--accent-danger, #ff3366);
+  box-shadow: 0 0 8px var(--accent-danger, #ff3366);
+}
 
 .constellation__path {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono, monospace);
   font-size: 12px;
   color: #cbd5e1;
   flex: 1;
@@ -331,22 +336,37 @@ body[data-mode="sector"] .toggle-orb {
 }
 
 .constellation__ts {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono, monospace);
   font-size: 11px;
   color: #64748b;
   flex-shrink: 0;
 }
 
 .constellation__ops {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono, monospace);
   font-size: 11px;
-  color: var(--accent-plasma);
+  color: var(--accent-plasma, #ff5e3a);
   flex-shrink: 0;
 }
 
-@keyframes constellation-in {
-  to { opacity: 1; transform: translateX(0); }
+@keyframes slideIn {
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.3;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 0.7;
+  }
+}
+
 
 .constellation__meta {
   display: flex;
@@ -356,7 +376,7 @@ body[data-mode="sector"] .toggle-orb {
 }
 
 .meta-chip {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono, monospace);
   font-size: 12px;
   color: #94a3b8;
   padding: 4px 10px;
