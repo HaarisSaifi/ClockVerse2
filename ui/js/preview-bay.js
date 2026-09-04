@@ -4,6 +4,19 @@ import { invoke } from './event-stream.js';
 
 export class PreviewBay {
   constructor(container) {
+    this._tempDir = null;
+  }
+
+  async getTempDir() {
+    if (this._tempDir) return this._tempDir;
+    try {
+      if (typeof window.__TAURI__ !== 'undefined') {
+        this._tempDir = await invoke('get_temp_dir');
+        return this._tempDir;
+      }
+    } catch (_) {}
+    return '/tmp/';
+  }
     this.container = container;
     this.files = [];
     this.currentImage = null;
@@ -64,7 +77,9 @@ export class PreviewBay {
         if (!e.isIntersecting) continue;
         io.unobserve(e.target);
         const offset = e.target.dataset.offset;
-        const out = `/tmp/thumb_${offset}.png`;
+        const tempDir = await this.getTempDir();
+        const sep = tempDir.includes('\\') ? '\\' : '/';
+        const out = `${tempDir}${sep}thumb_${offset}.png`;
         try {
           const res = await invoke('sidecar_thumbnail', {
             imagePath: this.currentImage, offset: parseInt(offset, 10), outPath: out
@@ -83,7 +98,9 @@ export class PreviewBay {
   }
 
   async extractFile(f, e) {
-    const out = `/tmp/recovered_${f.name}`;
+    const tempDir = await this.getTempDir();
+    const sep = tempDir.includes('\\') ? '\\' : '/';
+    const out = `${tempDir}${sep}recovered_${f.name}`;
     try {
       const bytes = await invoke('extract_deleted_file', {
         imagePath: this.currentImage, recordNumber: f.record_number, outputPath: out

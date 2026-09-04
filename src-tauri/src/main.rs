@@ -363,22 +363,58 @@ async fn verify_carved_file(app: AppHandle, path: String) -> Result<bool, String
     .map_err(|e| e.to_string())?
 }
 
+#[tauri::command]
+fn get_temp_dir() -> String {
+    std::env::temp_dir().to_string_lossy().to_string()
+}
+
 fn main() {
-    let index = EventIndex::in_memory().expect("in-memory index init");
-    let state = AppState {
-        index: Arc::new(StdMutex::new(index)),
+    // Problem #1 fix: Persistent DB with env override for tests
+    let db_path = std::env::var("CLOCKVERSE_DB")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let mut p = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+            p.push("clockverse");
+            p.push("sessions.db");
+            p
+        });
+
+    // Ensure directory exists
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    let index = EventIndex::open(db_path.to_str().expect("invalid db path"))
+        .expect("failed to open persistent event index");
+
+    // Problem #3 fix: Resolve sidecar path relative to exe or cwd
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let sidecar_path = exe_dir.join("sidecar/sidecar.py");
+    let sidecar_path = if sidecar_path.exists() {
+        sidecar_path
+    } else {
+        // Dev fallback: assume running from workspace root
+        std::path::PathBuf::from("sidecar/sidecar.py")
     };
 
-    // Spawn the forensic Python sidecar. Panics if python3 is unavailable —
-    // it is a mandatory component of the engine (heavy image/TSK work runs here).
-    let sidecar: SharedSidecar = Arc::new(TokioMutex::new(
-        tauri::async_runtime::block_on(Sidecar::spawn("python3", "sidecar/sidecar.py"))
-            .expect("failed to spawn sidecar"),
-    ));
+    // Problem #3 fix: Python executable detection (Windows vs Unix)
+    let python_cmd = if cfg!(windows) { "python" } else { "python3" };
+
+    let sidecar = tauri::async_runtime::block_on(async {
+        Sidecar::spawn(python_cmd, sidecar_path.to_str().unwrap())
+            .await
+            .expect("failed to spawn sidecar")
+    });
 
     tauri::Builder::default()
-        .manage(state)
-        .manage(sidecar)
+        .manage(AppState {
+            index: Arc::new(StdMutex::new(index)),
+        })
+        .manage(Arc::new(TokioMutex::new(sidecar)) as SharedSidecar)
         .invoke_handler(tauri::generate_handler![
             start_scan,
             trim_health_check,
@@ -389,7 +425,8 @@ fn main() {
             extract_deleted_file,
             verify_carved_file,
             sidecar_list_partitions,
-            sidecar_thumbnail
+            sidecar_thumbnail,
+            get_temp_dir
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClockVerse");

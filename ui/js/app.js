@@ -22,7 +22,42 @@ logLine('CLOCKVERSE FORENSIC ENGINE INITIALIZED');
 logLine('System Architecture: Rust SectorForge + Python Sidecar + Tauri Shell');
 logLine('Mode: Quantum ChronoScan active');
 
-onEngineEvent((e) => {
+// Problem #4 fix: Mode FSM event queue and suspend/resume wiring
+let scanPaused = false;
+const eventQueue = [];
+
+modes.on('sector', 'suspend', () => {
+  scanPaused = true;
+  logLine('⏸ SCAN SUSPENDED (mode switch)');
+});
+
+modes.on('sector', 'resume', () => {
+  scanPaused = false;
+  logLine('▶ SCAN RESUMED');
+  while (eventQueue.length > 0) {
+    handleEngineEvent(eventQueue.shift());
+  }
+});
+
+modes.on('chrono', 'suspend', () => {
+  scanPaused = true;
+  logLine('⏸ CHRONO SUSPENDED (mode switch)');
+});
+
+modes.on('chrono', 'resume', () => {
+  scanPaused = false;
+  logLine('▶ CHRONO RESUMED');
+  while (eventQueue.length > 0) {
+    handleEngineEvent(eventQueue.shift());
+  }
+});
+
+function handleEngineEvent(e) {
+  if (scanPaused) {
+    eventQueue.push(e);
+    return;
+  }
+
   switch (e.type) {
     case 'scan_started':
       lastScanTarget = e.target;
@@ -72,9 +107,45 @@ if (modeToggle) {
   });
 }
 
+// Problem #3 fix: File picker & scan type handling
+const browseBtn = document.getElementById('btn-browse');
+const imageInput = document.getElementById('image-file-input');
+const selectedFileLabel = document.getElementById('selected-file');
+
+if (browseBtn && imageInput) {
+  browseBtn.addEventListener('click', () => imageInput.click());
+  imageInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      selectedFileLabel.textContent = `Selected: ${file.name}`;
+      window.selectedImagePath = file.path || file.name;
+    }
+  });
+}
+
+document.querySelectorAll('input[name="scan-type"]').forEach(radio => {
+  radio.addEventListener('change', (e) => {
+    const isDrive = e.target.value === 'drive';
+    const pickerSec = document.getElementById('file-picker-section');
+    const driveWarn = document.getElementById('drive-warning');
+    if (pickerSec) pickerSec.classList.toggle('hidden', isDrive);
+    if (driveWarn) driveWarn.classList.toggle('hidden', !isDrive);
+  });
+});
+
 const scanBtn = document.getElementById('btn-scan');
 if (scanBtn) {
   scanBtn.addEventListener('click', async () => {
+    const scanTypeRadio = document.querySelector('input[name="scan-type"]:checked');
+    const scanType = scanTypeRadio ? scanTypeRadio.value : 'image';
+
+    if (scanType === 'image' && !window.selectedImagePath) {
+      alert('Please select a disk image file (.dd, .img, .raw) first.');
+      return;
+    }
+
+    const target = scanType === 'image' ? window.selectedImagePath : '\\\\.\\PhysicalDrive0';
+
     const warn = document.getElementById('recovery-window');
     warn.textContent = '⚠ VaultGuard Active: Read-only access enforced. Minimal writes to this drive until recovery.';
     warn.classList.remove('hidden');
@@ -87,7 +158,7 @@ if (scanBtn) {
     `;
 
     try {
-      await invoke('start_scan', { target: 'PhysicalDrive0' });
+      await invoke('start_scan', { target });
     } catch (err) {
       logLine(`Invoke error: ${err}`);
     } finally {
