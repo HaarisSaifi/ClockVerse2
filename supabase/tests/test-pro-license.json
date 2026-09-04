@@ -1,0 +1,21 @@
+{
+  "event": "payment.captured",
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_ProTest123456",
+        "order_id": "order_ProTest789",
+        "amount": 199900,
+        "currency": "INR",
+        "email": "test.pro@example.com",
+        "contact": "+919876543211",
+        "status": "captured",
+        "method": "card",
+        "notes": {
+          "email": "test.pro@example.com",
+          "product": "pro_lifetime"
+        }
+      }
+    }
+  }
+}

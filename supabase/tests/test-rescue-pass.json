@@ -1,0 +1,21 @@
+{
+  "event": "payment.captured",
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_RescueTest123456",
+        "order_id": "order_RescueTest789",
+        "amount": 29900,
+        "currency": "INR",
+        "email": "test.rescue@example.com",
+        "contact": "+919876543210",
+        "status": "captured",
+        "method": "upi",
+        "notes": {
+          "email": "test.rescue@example.com",
+          "product": "rescue_pass"
+        }
+      }
+    }
+  }
+}

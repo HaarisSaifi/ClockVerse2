@@ -1,0 +1,13 @@
+{
+  "event": "payment.captured",
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_FakeTest123",
+        "order_id": "order_FakeTest123",
+        "amount": 29900,
+        "email": "hacker@fake.com"
+      }
+    }
+  }
+}

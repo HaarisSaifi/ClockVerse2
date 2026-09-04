@@ -1,0 +1,21 @@
+{
+  "event": "payment.captured",
+  "payload": {
+    "payment": {
+      "entity": {
+        "id": "pay_StudioTest123456",
+        "order_id": "order_StudioTest789",
+        "amount": 799900,
+        "currency": "INR",
+        "email": "test.studio@example.com",
+        "contact": "+919876543212",
+        "status": "captured",
+        "method": "netbanking",
+        "notes": {
+          "email": "test.studio@example.com",
+          "product": "studio_3devices"
+        }
+      }
+    }
+  }
+}
