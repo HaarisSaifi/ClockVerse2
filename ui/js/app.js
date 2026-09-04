@@ -86,7 +86,10 @@ function handleEngineEvent(e) {
       if (e.type) logLine(`EVENT [${e.type}]`);
       break;
   }
-});
+}
+
+// Register the engine event handler
+onEngineEvent(handleEngineEvent);
 
 // File restored via Preview Bay → counter roll-up.
 document.addEventListener('file-restored', (e) => {

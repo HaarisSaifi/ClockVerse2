@@ -121,6 +121,13 @@ export async function invoke(cmd, args) {
     };
   }
 
+    if (cmd === 'get_temp_dir') {
+    return '/tmp/';
+  }
+
+  if (cmd === 'select_image_file') {
+    return null;
+  }
   if (cmd === 'chrono_time_travel') {
     const out = {};
     for (const [k, v] of mockStore.files) {

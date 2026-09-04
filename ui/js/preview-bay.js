@@ -14,7 +14,11 @@ export class PreviewBay {
     if (this._tempDir) return this._tempDir;
     try {
       if (typeof window.__TAURI__ !== 'undefined') {
-        this._tempDir = await invoke('get_temp_dir');
+        if (window.__TAURI__.core?.invoke) {
+          this._tempDir = await window.__TAURI__.core.invoke('get_temp_dir');
+        } else {
+          this._tempDir = await invoke('get_temp_dir');
+        }
         return this._tempDir;
       }
     } catch (_) {}
