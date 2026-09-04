@@ -480,7 +480,7 @@ async fn select_folder() -> Result<Option<String>, String> {
 }
 
 
-const DEFAULT_SUPABASE_URL: &str = "https://clockverse-prod.supabase.co";
+const DEFAULT_SUPABASE_URL: &str = "https://hdjedvcyzrzrryvddsat.supabase.co";
 const DEFAULT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

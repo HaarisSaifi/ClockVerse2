@@ -33,3 +33,6 @@ __pycache__/
 *$py.class
 .pytest_cache/
 
+
+# Supabase temp
+supabase/.temp/
