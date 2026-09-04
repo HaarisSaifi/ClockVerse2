@@ -21,6 +21,12 @@
         <div class="toggle-track"><div class="toggle-orb"></div></div>
         <span class="mode-label">SECTOR</span>
       </div>
+          <div class="license-badge-container">
+        <button class="btn-magnetic" id="btn-license-modal">
+          <span class="license-status-dot" id="license-indicator"></span>
+          <span id="license-label">FREE TIER</span>
+        </button>
+      </div>
     </header>
 
     <section class="holo-card" id="scan-card">
@@ -86,5 +92,48 @@
 
   <input type="file" id="jsonl-picker" accept=".jsonl,.log,.txt" class="hidden" />
   <script type="module" src="js/app.js"></script>
+
+  <!-- License Modal -->
+  <div id="license-modal" class="modal-backdrop hidden">
+    <div class="modal-dialog holo-card">
+      <div class="terminal-header">
+        <h2>⚡ Activate ClockVerse License</h2>
+        <button class="btn-icon" id="btn-close-license">&times;</button>
+      </div>
+      <p class="dim" style="margin: 12px 0;">Enter your license key received via email after purchasing your pass.</p>
+
+      <div class="license-input-group">
+        <input type="text" id="license-key-input" placeholder="CLOCKVERSE-PRO-XXXXX-YYYYY" spellcheck="false" autocomplete="off" />
+        <button class="btn-magnetic" id="btn-activate-license">Activate</button>
+      </div>
+      <div id="license-activation-status" class="dim" style="margin-top: 8px; font-size: 12px;"></div>
+
+      <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;" />
+
+      <h3 style="font-size: 14px; margin-bottom: 12px; color: var(--accent-active);">Need a License? Select a Pass:</h3>
+      <div class="pricing-grid">
+        <div class="pricing-card">
+          <h4>Rescue Pass</h4>
+          <div class="price">₹299</div>
+          <p class="dim">7-day unlimited recovery pass. Perfect for one-time disasters.</p>
+          <a href="https://rzp.io/l/clockverse-rescue" target="_blank" class="btn-magnetic btn-buy">Buy ₹299</a>
+        </div>
+        <div class="pricing-card featured">
+          <div class="badge-featured">POPULAR</div>
+          <h4>Pro Lifetime</h4>
+          <div class="price">₹1,999</div>
+          <p class="dim">Permanent unlimited file recovery & Time Capsule on 1 device.</p>
+          <a href="https://rzp.io/l/clockverse-pro" target="_blank" class="btn-magnetic btn-buy">Buy ₹1,999</a>
+        </div>
+        <div class="pricing-card">
+          <h4>Studio Pack</h4>
+          <div class="price">₹7,999</div>
+          <p class="dim">Lifetime commercial license for up to 3 workstations.</p>
+          <a href="https://rzp.io/l/clockverse-studio" target="_blank" class="btn-magnetic btn-buy">Buy ₹7,999</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>

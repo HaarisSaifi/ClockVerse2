@@ -1,3 +1,11 @@
+// In-memory mock license for dev mode
+let mockLicense = {
+  valid: false,
+  tier: null,
+  activated: false,
+  error: null,
+  expires_at: null
+};
 // In-memory mock folders for browser dev
 const mockCapsuleFolders = [];
 // Tauri event bridge. In browser-dev mode, falls back to a mock feed
@@ -151,6 +159,40 @@ export async function invoke(cmd, args) {
   }
   if (cmd === 'select_folder') {
     return 'D:\\Projects\\ClockVerse';
+  }
+
+  
+  if (cmd === 'validate_license') {
+    if (args.key && args.key.startsWith('CLOCKVERSE-')) {
+      const parts = args.key.split('-');
+      const tier = parts[1] ? parts[1].toLowerCase() : 'pro';
+      return {
+        valid: true,
+        tier: tier,
+        activated: true,
+        error: null,
+        expires_at: tier === 'rescue_pass' ? new Date(Date.now() + 7 * 86400 * 1000).toISOString() : null
+      };
+    }
+    return { valid: false, tier: null, activated: false, error: 'Invalid license format. Expected CLOCKVERSE-TIER-...' };
+  }
+  if (cmd === 'activate_license') {
+    if (args.key && args.key.startsWith('CLOCKVERSE-')) {
+      const parts = args.key.split('-');
+      const tier = parts[1] ? parts[1].toLowerCase() : 'pro';
+      mockLicense = {
+        valid: true,
+        tier: tier,
+        activated: true,
+        error: null,
+        expires_at: tier === 'rescue_pass' ? new Date(Date.now() + 7 * 86400 * 1000).toISOString() : null
+      };
+      return mockLicense;
+    }
+    throw new Error('Invalid license format. Key must start with CLOCKVERSE-');
+  }
+  if (cmd === 'check_license_grace') {
+    return mockLicense;
   }
 
   if (cmd === 'select_image_file') {

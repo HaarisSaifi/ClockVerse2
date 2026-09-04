@@ -346,4 +346,83 @@ if (timeCapsuleContainer) {
   window.timeCapsule.refresh();
 }
 
+
+// ===== License & Monetization System =====
+let activeLicense = null;
+
+const licenseModal = document.getElementById('license-modal');
+const btnOpenLicense = document.getElementById('btn-license-modal');
+const btnCloseLicense = document.getElementById('btn-close-license');
+const btnActivateLicense = document.getElementById('btn-activate-license');
+const licenseInput = document.getElementById('license-key-input');
+const licenseStatusEl = document.getElementById('license-activation-status');
+const licenseIndicator = document.getElementById('license-indicator');
+const licenseLabel = document.getElementById('license-label');
+
+function updateLicenseUI(status) {
+  if (status && status.valid && status.activated) {
+    activeLicense = status;
+    const tierName = (status.tier || 'PRO').toUpperCase();
+    licenseLabel.textContent = `${tierName}`;
+    licenseIndicator.classList.add('active');
+    logLine(`LICENSE ACTIVE: ${tierName} tier verified`);
+  } else {
+    activeLicense = null;
+    licenseLabel.textContent = 'FREE TIER';
+    licenseIndicator.classList.remove('active');
+  }
+}
+
+if (btnOpenLicense) {
+  btnOpenLicense.addEventListener('click', () => {
+    if (licenseModal) licenseModal.classList.remove('hidden');
+  });
+}
+
+if (btnCloseLicense) {
+  btnCloseLicense.addEventListener('click', () => {
+    if (licenseModal) licenseModal.classList.add('hidden');
+  });
+}
+
+if (btnActivateLicense) {
+  btnActivateLicense.addEventListener('click', async () => {
+    const key = (licenseInput.value || '').trim();
+    if (!key) {
+      licenseStatusEl.textContent = 'Please enter a license key';
+      licenseStatusEl.style.color = 'var(--accent-danger)';
+      return;
+    }
+
+    licenseStatusEl.textContent = 'Validating license with server...';
+    licenseStatusEl.style.color = 'var(--accent-solar)';
+
+    try {
+      const res = await invoke('activate_license', { key });
+      if (res && res.valid && res.activated) {
+        updateLicenseUI(res);
+        licenseStatusEl.textContent = `✓ License activated successfully: ${(res.tier || 'PRO').toUpperCase()}`;
+        licenseStatusEl.style.color = 'var(--accent-emerald)';
+        setTimeout(() => {
+          if (licenseModal) licenseModal.classList.add('hidden');
+        }, 1500);
+      } else {
+        licenseStatusEl.textContent = res.error || 'Activation failed';
+        licenseStatusEl.style.color = 'var(--accent-danger)';
+      }
+    } catch (err) {
+      licenseStatusEl.textContent = `Error: ${err}`;
+      licenseStatusEl.style.color = 'var(--accent-danger)';
+    }
+  });
+}
+
+// Check initial license state on app load
+(async () => {
+  try {
+    const status = await invoke('check_license_grace');
+    updateLicenseUI(status);
+  } catch (_) {}
+})();
+
 export {};

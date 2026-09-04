@@ -6,7 +6,10 @@ use clockverse_engine::sidecar::Sidecar;
 use clockverse_engine::{
     chrono::StreamStitch, ntfs, ntfs_extract, partition, sectorforge, EngineEvent,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use reqwest::Client;
+use serde_json::json;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -476,6 +479,96 @@ async fn select_folder() -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
+
+const DEFAULT_SUPABASE_URL: &str = "https://clockverse-prod.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LicenseStatus {
+    pub valid: bool,
+    pub tier: Option<String>,
+    pub activated: bool,
+    pub error: Option<String>,
+    pub expires_at: Option<String>,
+}
+
+#[tauri::command]
+async fn validate_license(key: String) -> Result<LicenseStatus, String> {
+    let machine_id = machine_uid::get().unwrap_or_else(|_| "generic-machine-id".to_string());
+    let supabase_url = std::env::var("CLOCKVERSE_SUPABASE_URL")
+        .unwrap_or_else(|_| DEFAULT_SUPABASE_URL.to_string());
+    let supabase_key = std::env::var("CLOCKVERSE_SUPABASE_KEY")
+        .unwrap_or_else(|_| DEFAULT_SUPABASE_ANON_KEY.to_string());
+
+    let client = Client::new();
+    let res = client
+        .post(format!("{}/functions/v1/validate-license", supabase_url))
+        .header("Authorization", format!("Bearer {}", supabase_key))
+        .header("Content-Type", "application/json")
+        .json(&json!({
+            "license_key": key,
+            "machine_id": machine_id
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Network request failed: {}", e))?;
+
+    let status: LicenseStatus = res
+        .json()
+        .await
+        .map_err(|e| format!("Invalid JSON response: {}", e))?;
+    Ok(status)
+}
+
+#[tauri::command]
+async fn activate_license(key: String) -> Result<LicenseStatus, String> {
+    let status = validate_license(key).await?;
+    if status.valid && status.activated {
+        let mut config = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        config.push("clockverse");
+        std::fs::create_dir_all(&config).ok();
+        config.push("license.json");
+        std::fs::write(config, serde_json::to_string_pretty(&status).unwrap())
+            .map_err(|e| e.to_string())?;
+        Ok(status)
+    } else {
+        Err(status.error.unwrap_or_else(|| "License activation failed".to_string()))
+    }
+}
+
+#[tauri::command]
+async fn check_license_grace() -> Result<LicenseStatus, String> {
+    let mut config = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+    config.push("clockverse");
+    config.push("license.json");
+    if let Ok(content) = std::fs::read_to_string(config) {
+        if let Ok(status) = serde_json::from_str::<LicenseStatus>(&content) {
+            // Check expiry date if specified
+            if let Some(expires) = &status.expires_at {
+                if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(expires) {
+                    if exp.timestamp() <= chrono::Utc::now().timestamp() {
+                        return Ok(LicenseStatus {
+                            valid: false,
+                            tier: status.tier,
+                            activated: false,
+                            error: Some("License expired".to_string()),
+                            expires_at: status.expires_at,
+                        });
+                    }
+                }
+            }
+            return Ok(status);
+        }
+    }
+    Ok(LicenseStatus {
+        valid: false,
+        tier: None,
+        activated: false,
+        error: None,
+        expires_at: None,
+    })
+}
+
 fn main() {
     // Problem #1 fix: Persistent DB with env override for tests
     let db_path = std::env::var("CLOCKVERSE_DB")
@@ -575,7 +668,10 @@ fn main() {
             time_capsule_protect,
             time_capsule_snapshot,
             time_capsule_list,
-            select_folder
+            select_folder,
+            validate_license,
+            activate_license,
+            check_license_grace
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClockVerse");
