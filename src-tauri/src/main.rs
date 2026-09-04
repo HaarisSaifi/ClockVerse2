@@ -619,7 +619,7 @@ fn main() {
 
     // Background Time Capsule Auto-Snapshot Daemon (Runs every 10 minutes)
     let capsule_daemon = Arc::clone(&time_capsule);
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600));
         loop {
             interval.tick().await;
