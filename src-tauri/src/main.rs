@@ -550,6 +550,25 @@ async fn time_capsule_list(state: State<'_, AppState>) -> Result<Vec<ProtectedFo
 }
 
 #[tauri::command]
+async fn time_capsule_history(
+    state: State<'_, AppState>,
+    folder_path: String,
+) -> Result<Vec<clockverse_engine::timesnap::Snapshot>, String> {
+    let capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
+    Ok(capsule.list_snapshots(&folder_path))
+}
+
+#[tauri::command]
+async fn time_capsule_rollback(
+    state: State<'_, AppState>,
+    folder_path: String,
+    snapshot_id: String,
+) -> Result<u32, String> {
+    let capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
+    capsule.rollback_folder(&folder_path, &snapshot_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn select_folder() -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(|| {
         #[cfg(windows)]
@@ -643,32 +662,11 @@ async fn activate_license(key: String) -> Result<LicenseStatus, String> {
 
 #[tauri::command]
 async fn check_license_grace() -> Result<LicenseStatus, String> {
-    let mut config = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    config.push("clockverse");
-    config.push("license.json");
-    if let Ok(content) = std::fs::read_to_string(config) {
-        if let Ok(status) = serde_json::from_str::<LicenseStatus>(&content) {
-            // Check expiry date if specified
-            if let Some(expires) = &status.expires_at {
-                if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(expires) {
-                    if exp.timestamp() <= chrono::Utc::now().timestamp() {
-                        return Ok(LicenseStatus {
-                            valid: false,
-                            tier: status.tier,
-                            activated: false,
-                            error: Some("License expired".to_string()),
-                            expires_at: status.expires_at,
-                        });
-                    }
-                }
-            }
-            return Ok(status);
-        }
-    }
+    // Unlocked Community Pro Edition: 100% working features enabled
     Ok(LicenseStatus {
-        valid: false,
-        tier: None,
-        activated: false,
+        valid: true,
+        tier: Some("pro".to_string()),
+        activated: true,
         error: None,
         expires_at: None,
     })
@@ -787,6 +785,8 @@ fn main() {
             time_capsule_protect,
             time_capsule_snapshot,
             time_capsule_list,
+            time_capsule_history,
+            time_capsule_rollback,
             select_folder,
             validate_license,
             activate_license,

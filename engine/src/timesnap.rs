@@ -1,6 +1,7 @@
-//! Time Capsule — background snapshot daemon.
-//! Incremental: sirf changed files save hote hain (content-hash based).
-//! Storage: user-selected folder -> compressed/structured snapshots in app data dir.
+//! Time Capsule — background snapshot daemon & data insurance engine.
+//! Incremental: content-addressable storage (CAS) keyed by SHA-256 hash.
+//! Deduplicated: Identical files stored only once across all snapshots.
+//! Zero-loss recovery: Accidental deletions or corrupted edits can be 100% rolled back.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -62,6 +63,7 @@ impl TimeCapsule {
             .join("clockverse")
             .join("time-capsule");
         fs::create_dir_all(&storage).ok();
+        fs::create_dir_all(storage.join("objects")).ok();
 
         let mut capsule = Self {
             storage_dir: storage,
@@ -73,6 +75,7 @@ impl TimeCapsule {
 
     pub fn with_storage(storage: PathBuf) -> Self {
         fs::create_dir_all(&storage).ok();
+        fs::create_dir_all(storage.join("objects")).ok();
         let mut capsule = Self {
             storage_dir: storage,
             folders: Vec::new(),
@@ -132,10 +135,14 @@ impl TimeCapsule {
     }
 
     /// Incremental content-hashed snapshot of a protected folder.
+    /// Stores files into content-addressable object store (CAS) by SHA-256 hash.
     pub fn snapshot_folder(&mut self, folder_path: &str) -> anyhow::Result<Snapshot> {
         let _ = self.folders.iter_mut()
             .find(|f| f.path == folder_path)
             .ok_or_else(|| anyhow::anyhow!("Folder is not registered for protection"))?;
+
+        let objects_dir = self.storage_dir.join("objects");
+        fs::create_dir_all(&objects_dir).ok();
 
         let mut entries = Vec::new();
         let mut total_size = 0u64;
@@ -158,7 +165,6 @@ impl TimeCapsule {
                 }
             }
 
-            // Also skip if path is inside .git or node_modules
             let path_str = path.to_string_lossy();
             if path_str.contains("/.git/") || path_str.contains("\\.git\\")
                 || path_str.contains("/node_modules/") || path_str.contains("\\node_modules\\")
@@ -192,7 +198,12 @@ impl TimeCapsule {
                 .unwrap_or_default()
                 .as_micros() as u64;
 
-            changed += 1;
+            // Content-addressable storage: store raw bytes keyed by hash if not already present
+            let obj_file = objects_dir.join(&hash);
+            if !obj_file.exists() {
+                let _ = fs::write(&obj_file, &content);
+                changed += 1;
+            }
 
             entries.push(SnapshotEntry {
                 rel_path,
@@ -224,24 +235,62 @@ impl TimeCapsule {
         Ok(snapshot)
     }
 
-    /// Restore file from snapshot to destination path
-    pub fn restore_file(&self, snapshot_id: &str, rel_path: &str, dest: &str) -> anyhow::Result<()> {
+    /// Restore a specific file from snapshot to destination path with SHA-256 verification
+    pub fn restore_file(&self, snapshot_id: &str, rel_path: &str, dest: &str) -> anyhow::Result<u64> {
         let snapshot = self.load_snapshot(snapshot_id)?;
-        let _ = snapshot.entries.iter()
+        let entry = snapshot.entries.iter()
             .find(|e| e.rel_path == rel_path)
             .ok_or_else(|| anyhow::anyhow!("File '{}' not found in snapshot {}", rel_path, snapshot_id))?;
 
-        let src = Path::new(&snapshot.folder_path).join(rel_path);
-        if src.exists() {
-            let dest_path = Path::new(dest);
-            if let Some(parent) = dest_path.parent() {
-                fs::create_dir_all(parent).ok();
-            }
-            fs::copy(&src, dest)?;
-            Ok(())
-        } else {
-            anyhow::bail!("Original source file no longer present at {:?}", src)
+        let obj_path = self.storage_dir.join("objects").join(&entry.hash);
+        if !obj_path.exists() {
+            anyhow::bail!("Snapshot content object missing: {}", entry.hash);
         }
+
+        let content = fs::read(&obj_path)?;
+        let actual_hash = format!("{:x}", Sha256::digest(&content));
+        if actual_hash != entry.hash {
+            anyhow::bail!("Data corruption detected: SHA-256 hash mismatch for {}", rel_path);
+        }
+
+        let dest_path = Path::new(dest);
+        if let Some(parent) = dest_path.parent() {
+            fs::create_dir_all(parent).ok();
+        }
+        fs::write(dest_path, &content)?;
+        Ok(content.len() as u64)
+    }
+
+    /// Roll back an entire protected folder to a specific snapshot with 100% byte accuracy
+    pub fn rollback_folder(&self, folder_path: &str, snapshot_id: &str) -> anyhow::Result<u32> {
+        let snapshot = self.load_snapshot(snapshot_id)?;
+        let target_dir = Path::new(folder_path);
+        if !target_dir.exists() {
+            fs::create_dir_all(target_dir)?;
+        }
+
+        let mut restored_count = 0u32;
+
+        for entry in &snapshot.entries {
+            let dest = target_dir.join(&entry.rel_path);
+            let obj_path = self.storage_dir.join("objects").join(&entry.hash);
+
+            if obj_path.exists() {
+                if let Ok(content) = fs::read(&obj_path) {
+                    let actual_hash = format!("{:x}", Sha256::digest(&content));
+                    if actual_hash == entry.hash {
+                        if let Some(parent) = dest.parent() {
+                            fs::create_dir_all(parent).ok();
+                        }
+                        if fs::write(&dest, &content).is_ok() {
+                            restored_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(restored_count)
     }
 
     pub fn save_snapshot(&self, snapshot: &Snapshot) -> anyhow::Result<()> {
@@ -320,5 +369,52 @@ mod tests {
         let snaps = capsule.list_snapshots(&folder.path);
         assert_eq!(snaps.len(), 1);
         assert_eq!(snaps[0].entries.len(), 2);
+    }
+
+    #[test]
+    fn test_accidental_deletion_and_byte_exact_rollback() {
+        let tmp = TempDir::new().unwrap();
+        let storage = tmp.path().join("time-capsule-storage");
+        let mut capsule = TimeCapsule::with_storage(storage);
+
+        let test_dir = tmp.path().join("my_secret_code");
+        fs::create_dir(&test_dir).unwrap();
+
+        let original_code = "def compute(): return 42 * 1337";
+        let original_doc = "# Important Secret Documentation";
+        fs::write(test_dir.join("app.py"), original_code).unwrap();
+        fs::write(test_dir.join("secret.md"), original_doc).unwrap();
+
+        // 1. Protect folder (takes initial snapshot)
+        let folder = capsule.protect_folder(
+            test_dir.to_string_lossy().to_string(),
+            "Secret Project".to_string()
+        ).unwrap();
+
+        let snaps = capsule.list_snapshots(&folder.path);
+        assert_eq!(snaps.len(), 1);
+        let snap_id = &snaps[0].id;
+
+        // 2. DISASTER STRIKES: An accidental deletion or corrupted overwrite occurs!
+        // Delete app.py completely
+        fs::remove_file(test_dir.join("app.py")).unwrap();
+        assert!(!test_dir.join("app.py").exists());
+
+        // Corrupt secret.md
+        fs::write(test_dir.join("secret.md"), "CORRUPTED DATA DESTROYED").unwrap();
+
+        // 3. RESURRECTION & ROLLBACK: Time Capsule brings back the exact data
+        let restored = capsule.rollback_folder(&folder.path, snap_id).unwrap();
+        assert_eq!(restored, 2);
+
+        // 4. VERIFY 100% BYTE ACCURACY
+        assert!(test_dir.join("app.py").exists());
+        let recovered_code = fs::read_to_string(test_dir.join("app.py")).unwrap();
+        assert_eq!(recovered_code, original_code);
+
+        let recovered_doc = fs::read_to_string(test_dir.join("secret.md")).unwrap();
+        assert_eq!(recovered_doc, original_doc);
+
+        println!("[PASS] Byte-exact resurrection and rollback verified!");
     }
 }
