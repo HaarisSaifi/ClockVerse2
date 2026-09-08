@@ -271,6 +271,11 @@ if (scanBtn) {
       if (files && Array.isArray(files)) {
         previewBay.setRecoveredFiles(files);
         logLine(`✓ SectorForge Carving Complete: ${files.length} entities extracted!`);
+        if (files.length > 0) {
+          logLine(`👉 ${files.length} files ready in Preview Bay! Click "Restore" or "⚡ Restore All" to save to Downloads\\ClockVerse_Restored.`);
+        } else {
+          logLine(`ℹ 0 entities found in this folder. Tip: If recovering deleted files from a drive, choose 'Physical Drive' or test instant carving with 'Instant Demo Platter'.`);
+        }
       }
     } catch (err) {
       logLine(`Invoke error: ${err}`);

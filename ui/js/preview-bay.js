@@ -35,10 +35,51 @@ export class PreviewBay {
     const header = document.createElement('div');
     header.className = 'preview-bay-header';
     header.innerHTML = `
-      <span class="preview-count-badge">${this.files.length} ENTITIES CARVED</span>
-      <span class="preview-help-text">Click 'Restore' to export file to your Downloads folder.</span>
+      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;">
+        <div>
+          <span class="preview-count-badge">${this.files.length} ENTITIES FOUND</span>
+          <span class="preview-help-text" style="margin-left: 8px;">Saved to: <strong style="color: var(--accent-emerald);">Downloads\\ClockVerse_Restored</strong></span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button id="btn-restore-all" class="btn-primary" style="padding: 6px 14px; font-size: 11px;">
+            ⚡ Restore All to Downloads
+          </button>
+          <button id="btn-open-folder" class="btn-secondary" style="padding: 6px 12px; font-size: 11px;">
+            📂 Open Restored Folder
+          </button>
+        </div>
+      </div>
     `;
     this.container.appendChild(header);
+
+    const restoreAllBtn = header.querySelector('#btn-restore-all');
+    if (restoreAllBtn) {
+      restoreAllBtn.addEventListener('click', async () => {
+        restoreAllBtn.disabled = true;
+        restoreAllBtn.textContent = 'Restoring all...';
+        let lastSaved = null;
+        for (const f of this.files) {
+          try {
+            lastSaved = await invoke('restore_file_to_disk', { sourcePath: f.path });
+            document.dispatchEvent(new CustomEvent('file-restored', {
+              detail: { name: f.name, bytes: f.size_bytes, savedPath: lastSaved }
+            }));
+          } catch (_) {}
+        }
+        restoreAllBtn.disabled = false;
+        restoreAllBtn.innerHTML = '✓ All Restored!';
+        if (lastSaved) {
+          invoke('open_in_explorer', { path: lastSaved });
+        }
+      });
+    }
+
+    const openFolderBtn = header.querySelector('#btn-open-folder');
+    if (openFolderBtn) {
+      openFolderBtn.addEventListener('click', () => {
+        invoke('open_in_explorer', { path: 'Downloads\\ClockVerse_Restored' });
+      });
+    }
 
     const grid = document.createElement('div');
     grid.className = 'preview-grid';

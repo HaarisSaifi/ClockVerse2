@@ -17,3 +17,8 @@ reqwest = { version = "0.12", features = ["json"] }
 machine-uid = "0.5"
 chrono = { version = "0.4", features = ["serde"] }
 
+
+[profile.release]
+opt-level = 2
+codegen-units = 8
+lto = false

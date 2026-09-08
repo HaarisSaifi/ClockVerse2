@@ -224,18 +224,18 @@ pub fn carve_folder(dir_path: &str, out_dir: &std::path::Path) -> anyhow::Result
     let mut extracted = Vec::new();
     let mut file_paths = Vec::new();
     
-    // Collect files recursively (up to 2,000 files)
+    // Collect files recursively (up to 3,000 files)
     fn collect_files(dir: &std::path::Path, list: &mut Vec<std::path::PathBuf>, depth: usize) {
-        if depth > 10 || list.len() >= 2000 {
+        if depth > 10 || list.len() >= 3000 {
             return;
         }
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    list.push(path);
-                } else if path.is_dir() {
-                    collect_files(&path, list, depth + 1);
+                let p = entry.path();
+                if p.is_file() {
+                    list.push(p);
+                } else if p.is_dir() {
+                    collect_files(&p, list, depth + 1);
                 }
             }
         }
@@ -254,35 +254,30 @@ pub fn carve_folder(dir_path: &str, out_dir: &std::path::Path) -> anyhow::Result
             Err(_) => continue,
         };
         let file_len = metadata.len();
-        if file_len == 0 || file_len > 100 * 1024 * 1024 {
-            // Skip empty files or files >100MB to maintain instant speed
+        if file_len == 0 || file_len > 250 * 1024 * 1024 {
+            // Skip 0-byte or very large (>250MB) files
             continue;
         }
 
         let orig_name = fpath.file_name().unwrap_or_default().to_string_lossy().to_string();
         let ext = fpath.extension().unwrap_or_default().to_string_lossy().to_lowercase();
 
-        // Read up to 8MB of file
-        let read_len = (8 * 1024 * 1024).min(file_len as usize);
-        let mut buf = vec![0u8; read_len];
-        if let Ok(mut f) = File::open(fpath) {
-            use std::io::Read;
-            if f.read_exact(&mut buf).is_err() && f.read_to_end(&mut buf).is_err() {
-                continue;
-            }
-        } else {
-            continue;
-        }
+        // Any file with a recognized extension is directly staged
+        let is_known = !ext.is_empty() && [
+            "jpg", "jpeg", "png", "gif", "bmp", "webp", "svg", "ico",
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "json", "xml", "log", "sql",
+            "zip", "rar", "7z", "tar", "gz",
+            "mp4", "mov", "avi", "mkv", "mp3", "wav", "flac",
+            "py", "rs", "js", "ts", "jsx", "tsx", "html", "css", "c", "cpp", "h"
+        ].contains(&ext.as_str());
 
-        let is_media = ["jpg", "jpeg", "png", "pdf", "zip", "mp4", "txt", "rs", "py", "js", "html", "css", "json", "doc", "docx"].contains(&ext.as_str());
-
-        if is_media {
+        if is_known {
             let dest_name = format!("recovered_{:03}_{}", file_idx + 1, orig_name);
             let dest_path = out_dir.join(&dest_name);
             if std::fs::copy(fpath, &dest_path).is_ok() {
                 extracted.push(CarvedFileInfo {
                     id: format!("dir_file_{}", file_idx),
-                    name: dest_name,
+                    name: orig_name.clone(),
                     path: dest_path.to_string_lossy().to_string(),
                     size_bytes: file_len,
                     extension: ext.clone(),
@@ -291,36 +286,43 @@ pub fn carve_folder(dir_path: &str, out_dir: &std::path::Path) -> anyhow::Result
                 });
             }
         } else {
-            // Scan for embedded magic bytes in binary / unknown / dat files
-            for m in ac.find_iter(&buf) {
-                let sig = &SIGNATURES[m.pattern().as_usize()];
-                let offset = if sig.name == "mp4" {
-                    m.start().saturating_sub(4)
-                } else {
-                    m.start()
-                };
-                let slice = &buf[offset..];
-                let len = match sig.extension {
-                    "jpg" => slice.windows(2).position(|w| w == b"\xFF\xD9").map(|p| p + 2).unwrap_or(65536.min(slice.len())),
-                    "png" => slice.windows(4).position(|w| w == b"IEND").map(|p| p + 8).unwrap_or(65536.min(slice.len())),
-                    "pdf" => slice.windows(5).rposition(|w| w == b"%%EOF").map(|p| p + 6).unwrap_or(131072.min(slice.len())),
-                    "zip" => slice.windows(4).rposition(|w| w == b"PK\x05\x06").map(|p| p + 22).unwrap_or(131072.min(slice.len())),
-                    _ => 65536.min(slice.len()),
-                };
-                if len >= 16 {
-                    let carved_bytes = &slice[..len];
-                    let carve_name = format!("carved_{:03}_{}_{}.{}", file_idx + 1, offset, orig_name, sig.extension);
-                    let dest_path = out_dir.join(&carve_name);
-                    if std::fs::write(&dest_path, carved_bytes).is_ok() {
-                        extracted.push(CarvedFileInfo {
-                            id: format!("dir_carve_{}_{}", file_idx, offset),
-                            name: carve_name,
-                            path: dest_path.to_string_lossy().to_string(),
-                            size_bytes: len as u64,
-                            extension: sig.extension.to_string(),
-                            confidence: 0.95,
-                            offset: offset as u64,
-                        });
+            // Scan binary, unknown, dat, or raw container files for embedded signatures
+            if let Ok(f) = File::open(fpath) {
+                use std::io::Read;
+                let mut buf = Vec::new();
+                let mut take = f.take(8 * 1024 * 1024);
+                if take.read_to_end(&mut buf).is_ok() && !buf.is_empty() {
+                    for m in ac.find_iter(&buf) {
+                        let sig = &SIGNATURES[m.pattern().as_usize()];
+                        let offset = if sig.name == "mp4" {
+                            m.start().saturating_sub(4)
+                        } else {
+                            m.start()
+                        };
+                        let slice = &buf[offset..];
+                        let len = match sig.extension {
+                            "jpg" => slice.windows(2).position(|w| w == b"\xFF\xD9").map(|p| p + 2).unwrap_or(65536.min(slice.len())),
+                            "png" => slice.windows(4).position(|w| w == b"IEND").map(|p| p + 8).unwrap_or(65536.min(slice.len())),
+                            "pdf" => slice.windows(5).rposition(|w| w == b"%%EOF").map(|p| p + 6).unwrap_or(131072.min(slice.len())),
+                            "zip" => slice.windows(4).rposition(|w| w == b"PK\x05\x06").map(|p| p + 22).unwrap_or(131072.min(slice.len())),
+                            _ => 65536.min(slice.len()),
+                        };
+                        if len >= 16 {
+                            let carved_bytes = &slice[..len];
+                            let carve_name = format!("carved_{:03}_{}_{}.{}", file_idx + 1, offset, orig_name, sig.extension);
+                            let dest_path = out_dir.join(&carve_name);
+                            if std::fs::write(&dest_path, carved_bytes).is_ok() {
+                                extracted.push(CarvedFileInfo {
+                                    id: format!("dir_carve_{}_{}", file_idx, offset),
+                                    name: carve_name,
+                                    path: dest_path.to_string_lossy().to_string(),
+                                    size_bytes: len as u64,
+                                    extension: sig.extension.to_string(),
+                                    confidence: 0.95,
+                                    offset: offset as u64,
+                                });
+                            }
+                        }
                     }
                 }
             }
