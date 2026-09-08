@@ -134,35 +134,64 @@ if (modeToggle) {
   });
 }
 
-// Problem #3 fix: File picker & scan type handling
-const browseBtn = document.getElementById('btn-browse');
+// Target Picker & Scan Type Handling (Folder, File, or Physical Drive)
+const btnBrowseFolder = document.getElementById('btn-browse-folder');
+const btnBrowseFile = document.getElementById('btn-browse-file');
+const targetPathInput = document.getElementById('target-path-input');
 const imageInput = document.getElementById('image-file-input');
 const selectedFileLabel = document.getElementById('selected-file');
 
-if (browseBtn) {
-  browseBtn.addEventListener('click', async () => {
-    let filePath = null;
-    if (typeof window.__TAURI__ !== 'undefined') {
-      try {
-        if (window.__TAURI__.dialog?.open) {
-          filePath = await window.__TAURI__.dialog.open({
-            filters: [{ name: 'Disk Images', extensions: ['dd', 'img', 'raw', 'E01'] }]
-          });
-        } else {
-          filePath = await invoke('select_image_file');
-        }
-      } catch (_) {
-        filePath = await invoke('select_image_file');
-      }
-    }
+function setTarget(path, isFolder = true) {
+  if (!path) return;
+  window.selectedImagePath = path;
+  if (targetPathInput) targetPathInput.value = path;
+  if (selectedFileLabel) {
+    selectedFileLabel.textContent = `Selected ${isFolder ? 'Folder' : 'File'}: ${path}`;
+    selectedFileLabel.style.color = 'var(--accent-emerald)';
+  }
+  logLine(`TARGET SELECTED: ${path}`);
+}
 
-    if (filePath) {
-      if (Array.isArray(filePath)) filePath = filePath[0];
-      window.selectedImagePath = filePath;
-      if (selectedFileLabel) selectedFileLabel.textContent = `Selected: ${filePath}`;
-    } else if (imageInput) {
-      // Browser dev fallback
-      imageInput.click();
+if (targetPathInput) {
+  targetPathInput.addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    window.selectedImagePath = val;
+    if (selectedFileLabel) {
+      selectedFileLabel.textContent = val ? `Target: ${val}` : 'No target selected.';
+    }
+  });
+}
+
+if (btnBrowseFolder) {
+  btnBrowseFolder.addEventListener('click', async () => {
+    try {
+      let folderPath = null;
+      if (typeof window.__TAURI__ !== 'undefined') {
+        folderPath = await invoke('select_folder');
+      }
+      if (folderPath) {
+        setTarget(folderPath, true);
+      }
+    } catch (e) {
+      logLine(`Folder selection error: ${e}`);
+    }
+  });
+}
+
+if (btnBrowseFile) {
+  btnBrowseFile.addEventListener('click', async () => {
+    try {
+      let filePath = null;
+      if (typeof window.__TAURI__ !== 'undefined') {
+        filePath = await invoke('select_image_file');
+      } else if (imageInput) {
+        imageInput.click();
+      }
+      if (filePath) {
+        setTarget(filePath, false);
+      }
+    } catch (e) {
+      logLine(`File selection error: ${e}`);
     }
   });
 }
@@ -172,19 +201,31 @@ if (imageInput) {
     const file = e.target.files[0];
     if (file) {
       const fullPath = file.path || file.name;
-      window.selectedImagePath = fullPath;
-      if (selectedFileLabel) selectedFileLabel.textContent = `Selected: ${file.name}`;
+      setTarget(fullPath, false);
     }
   });
 }
 
 document.querySelectorAll('input[name="scan-type"]').forEach(radio => {
   radio.addEventListener('change', (e) => {
-    const isDrive = e.target.value === 'drive';
+    const val = e.target.value;
+    const isDrive = val === 'drive';
+    const isFile = val === 'file';
     const pickerSec = document.getElementById('file-picker-section');
     const driveWarn = document.getElementById('drive-warning');
+    
     if (pickerSec) pickerSec.classList.toggle('hidden', isDrive);
     if (driveWarn) driveWarn.classList.toggle('hidden', !isDrive);
+    if (btnBrowseFolder) btnBrowseFolder.classList.toggle('hidden', isFile);
+    if (btnBrowseFile) btnBrowseFile.classList.toggle('hidden', !isFile);
+
+    if (targetPathInput) {
+      if (val === 'folder') {
+        targetPathInput.placeholder = 'Select folder or paste path (e.g. D:\\ZeusV4)...';
+      } else if (val === 'file') {
+        targetPathInput.placeholder = 'Select file or paste path (e.g. D:\\backup.img)...';
+      }
+    }
   });
 });
 
@@ -192,19 +233,26 @@ const scanBtn = document.getElementById('btn-scan');
 if (scanBtn) {
   scanBtn.addEventListener('click', async () => {
     const scanTypeRadio = document.querySelector('input[name="scan-type"]:checked');
-    const scanType = scanTypeRadio ? scanTypeRadio.value : 'image';
+    const scanType = scanTypeRadio ? scanTypeRadio.value : 'folder';
 
-    if (scanType === 'image' && !window.selectedImagePath) {
-      if (browseBtn) {
-        logLine('Prompting image file selection...');
-        browseBtn.click();
-      } else {
-        alert('Please select a disk image file (.dd, .img, .raw) first.');
+    const enteredPath = targetPathInput ? targetPathInput.value.trim() : '';
+    const target = scanType === 'drive' 
+      ? '\\\\.\\PhysicalDrive0' 
+      : (enteredPath || window.selectedImagePath);
+
+    if (scanType !== 'drive' && !target) {
+      logLine('⚠ Please select a folder or file to scan first.');
+      if (selectedFileLabel) {
+        selectedFileLabel.textContent = '⚠ Please select a target folder or file first.';
+        selectedFileLabel.style.color = 'var(--accent-danger)';
+      }
+      if (scanType === 'folder' && btnBrowseFolder) {
+        btnBrowseFolder.click();
+      } else if (btnBrowseFile) {
+        btnBrowseFile.click();
       }
       return;
     }
-
-    const target = scanType === 'image' ? window.selectedImagePath : '\\\\.\\PhysicalDrive0';
 
     const warn = document.getElementById('recovery-window');
     warn.textContent = '⚠ VaultGuard Active: Read-only access enforced. Minimal writes to this drive until recovery.';

@@ -53,24 +53,45 @@
       <div class="scan-controls">
         <div class="scan-type-selector">
           <label class="radio-label">
-            <input type="radio" name="scan-type" value="image" checked />
-            <span>Forensic Image (.dd, .raw, .img, .E01)</span>
+            <input type="radio" name="scan-type" value="folder" checked />
+            <span>📁 Folder / Directory (Recommended)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="scan-type" value="file" />
+            <span>📄 File / Disk Image (.dd, .raw, any file)</span>
           </label>
           <label class="radio-label">
             <input type="radio" name="scan-type" value="drive" />
-            <span>Physical Drive (Admin)</span>
+            <span>💾 Physical Drive (Admin)</span>
           </label>
         </div>
 
         <div id="file-picker-section" class="file-picker-container">
-          <button id="btn-browse" class="btn-secondary" type="button">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-            </svg>
-            Browse Disk Image
-          </button>
-          <span id="selected-file" class="selected-file-label">No disk image selected</span>
-          <input type="file" id="image-file-input" class="hidden" accept=".dd,.img,.raw,.E01" />
+          <div class="path-input-row" style="display: flex; gap: 8px; width: 100%; margin-bottom: 8px;">
+            <input 
+              type="text" 
+              id="target-path-input" 
+              class="target-path-input" 
+              placeholder="Select folder or paste path (e.g. D:\ZeusV4)..." 
+              spellcheck="false"
+              style="flex: 1; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; padding: 10px 14px; color: #fff; font-family: var(--font-mono); font-size: 13px;"
+            />
+            <button id="btn-browse-folder" class="btn-secondary" type="button" title="Browse and select any folder">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+              </svg>
+              Browse Folder
+            </button>
+            <button id="btn-browse-file" class="btn-secondary hidden" type="button" title="Browse and select any file or disk image">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+              </svg>
+              Browse File
+            </button>
+          </div>
+          <span id="selected-file" class="selected-file-label">No folder selected. Click 'Browse Folder' or paste path.</span>
+          <input type="file" id="image-file-input" class="hidden" />
         </div>
 
         <div id="drive-warning" class="drive-warning hidden">

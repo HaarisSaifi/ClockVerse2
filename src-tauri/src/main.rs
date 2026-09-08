@@ -31,16 +31,69 @@ async fn start_scan(
     app: AppHandle,
     target: String,
 ) -> Result<Vec<clockverse_engine::sectorforge::CarvedFileInfo>, String> {
+    let clean_target = target.trim().trim_matches('"').to_string();
+    if clean_target.is_empty() {
+        return Err("Target path cannot be empty. Please select a folder or file to scan.".to_string());
+    }
+
     let _ = app.emit(
         "engine",
         EngineEvent::ScanStarted {
-            target: target.clone(),
+            target: clean_target.clone(),
             total_sectors: 0,
         },
     );
 
-    let target_clone = target.clone();
-    let target_for_err = target.clone();
+    let path_obj = std::path::PathBuf::from(&clean_target);
+    let staging_dir = std::env::temp_dir().join("clockverse_staging");
+
+    // Case 1: Folder / Directory Scan
+    if path_obj.is_dir() {
+        let dir_str = clean_target.clone();
+        let staging_clone = staging_dir.clone();
+        let extracted = tauri::async_runtime::spawn_blocking(move || {
+            sectorforge::carve_folder(&dir_str, &staging_clone)
+        })
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+        for (i, file) in extracted.iter().enumerate() {
+            let _ = app.emit(
+                "engine",
+                EngineEvent::SectorResult {
+                    particle_index: (i % 1200) as u32,
+                    state_code: 1, // carved
+                    cluster: (file.offset / 4096) as u64,
+                    signature: file.extension.clone(),
+                    confidence: file.confidence,
+                },
+            );
+            let _ = app.emit(
+                "engine",
+                EngineEvent::FileRestored {
+                    path: file.path.clone(),
+                    bytes: file.size_bytes,
+                },
+            );
+        }
+
+        let verified_count = extracted.len() as u32;
+        let _ = app.emit(
+            "engine",
+            EngineEvent::ScanComplete {
+                found: verified_count,
+                verified: verified_count,
+                failures: 0,
+            },
+        );
+
+        return Ok(extracted);
+    }
+
+    // Case 2: File / Disk Image / Raw Drive
+    let target_clone = clean_target.clone();
+    let target_for_err = clean_target.clone();
     let hits = tauri::async_runtime::spawn_blocking(move || {
         sectorforge::carve_image(&target_clone, 64 * 1024 * 1024)
     })
@@ -529,7 +582,9 @@ async fn select_image_file() -> Result<Option<String>, String> {
             let script = r#"
             Add-Type -AssemblyName System.Windows.Forms
             $f = New-Object System.Windows.Forms.OpenFileDialog
-            $f.Filter = "Disk Images (*.dd;*.img;*.raw;*.E01)|*.dd;*.img;*.raw;*.E01|All Files (*.*)|*.*"
+            $f.Title = "Select File or Disk Image to Scan"
+            $f.Filter = "All Files (*.*)|*.*|Disk Images (*.dd;*.img;*.raw;*.iso;*.vhd;*.E01)|*.dd;*.img;*.raw;*.iso;*.vhd;*.E01|Media & Documents (*.jpg;*.png;*.pdf;*.zip;*.mp4)|*.jpg;*.png;*.pdf;*.zip;*.mp4"
+            $f.FilterIndex = 1
             if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 Write-Output $f.FileName
             }
