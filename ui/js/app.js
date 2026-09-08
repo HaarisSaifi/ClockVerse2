@@ -12,10 +12,35 @@ const previewBay = new PreviewBay(document.getElementById('preview-grid-containe
 let restored = 0;
 let lastScanTarget = null;
 
+let logBuffer = [];
+let logRafPending = false;
+
+function flushLogs() {
+  if (logBuffer.length === 0) {
+    logRafPending = false;
+    return;
+  }
+  const lines = logBuffer.join('\n') + '\n';
+  logBuffer = [];
+  if (terminal) {
+    terminal.textContent += lines;
+    // Keep at most 200 lines to preserve instant performance
+    const all = terminal.textContent.split('\n');
+    if (all.length > 200) {
+      terminal.textContent = all.slice(all.length - 200).join('\n');
+    }
+    terminal.scrollTop = terminal.scrollHeight;
+  }
+  logRafPending = false;
+}
+
 function logLine(msg) {
-  const ts = new Date().toISOString().slice(11, 23); // millisecond timestamps
-  terminal.textContent += `${ts}  ${msg}\n`;
-  terminal.scrollTop = terminal.scrollHeight;
+  const ts = new Date().toISOString().slice(11, 23);
+  logBuffer.push(`${ts}  ${msg}`);
+  if (!logRafPending) {
+    logRafPending = true;
+    requestAnimationFrame(flushLogs);
+  }
 }
 
 // Initial system status
@@ -192,7 +217,12 @@ if (scanBtn) {
     `;
 
     try {
-      await invoke('start_scan', { target });
+      logLine(`▶ Initializing SectorForge Carving Pipeline on ${target}...`);
+      const files = await invoke('start_scan', { target });
+      if (files && Array.isArray(files)) {
+        previewBay.setRecoveredFiles(files);
+        logLine(`✓ SectorForge Carving Complete: ${files.length} entities extracted!`);
+      }
     } catch (err) {
       logLine(`Invoke error: ${err}`);
     } finally {
@@ -313,18 +343,7 @@ if (jsonlPicker) {
   });
 }
 
-// Add an "Ingest Log" entry point into the scan card header area.
-const scanCard = document.getElementById('scan-card');
-if (scanCard) {
-  const ingestBtn = document.createElement('button');
-  ingestBtn.className = 'btn-magnetic';
-  ingestBtn.id = 'btn-ingest';
-  ingestBtn.style.marginLeft = '10px';
-  ingestBtn.innerHTML = '⟳';
-  ingestBtn.title = 'Ingest telemetry log (.jsonl)';
-  ingestBtn.addEventListener('click', () => jsonlPicker && jsonlPicker.click());
-  scanCard.querySelector('h2').after(ingestBtn);
-}
+// Ingest button moved to Session Constellation card
 
 // Browser-dev mode: mock a small telemetry ingest so the UI is previewable.
 if (typeof window.__TAURI__ === 'undefined') {
@@ -431,3 +450,42 @@ if (btnActivateLicense) {
 })();
 
 export {};
+
+// Wire Instant Demo Platter Button
+const btnDemoPlatter = document.getElementById('btn-demo-platter');
+if (btnDemoPlatter) {
+  btnDemoPlatter.addEventListener('click', async () => {
+    try {
+      logLine('⚡ Generating Simulated Forensic Platter (1MB image with real JPEG, PNG & PDF)...');
+      btnDemoPlatter.disabled = true;
+      btnDemoPlatter.textContent = 'Generating...';
+      const platterPath = await invoke('create_demo_platter');
+      window.selectedImagePath = platterPath;
+      if (selectedFileLabel) selectedFileLabel.textContent = `Selected: demo_platter.img`;
+      logLine(`✓ Platter created at: ${platterPath}`);
+      logLine('▶ Triggering deep scan on demo platter...');
+      
+      const files = await invoke('start_scan', { target: platterPath });
+      if (files && Array.isArray(files)) {
+        previewBay.setRecoveredFiles(files);
+        logLine(`✓ Recovery Success: ${files.length} real files carved and previewable!`);
+      }
+    } catch (err) {
+      logLine(`Error in Demo Platter: ${err}`);
+    } finally {
+      btnDemoPlatter.disabled = false;
+      btnDemoPlatter.innerHTML = `
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+        </svg>
+        Instant Demo Platter
+      `;
+    }
+  });
+}
+
+// Ingest Log Button in Constellation Card
+const btnIngestLog = document.getElementById('btn-ingest-log');
+if (btnIngestLog) {
+  btnIngestLog.addEventListener('click', () => jsonlPicker && jsonlPicker.click());
+}

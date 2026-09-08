@@ -8,30 +8,47 @@
   <link rel="stylesheet" href="holo.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 </head>
 <body data-mode="chrono">
   <canvas id="holo-canvas"></canvas>
 
   <main id="deck">
+    <!-- Topbar -->
     <header class="topbar">
-      <h1 class="brand">CLOCK<span>VERSE</span> <span class="brand-badge">PRO v1.0</span></h1>
-      <div id="mode-toggle" class="mode-toggle" role="switch" aria-checked="false">
-        <span class="mode-label">CHRONO</span>
-        <div class="toggle-track"><div class="toggle-orb"></div></div>
-        <span class="mode-label">SECTOR</span>
+      <div class="brand-group">
+        <h1 class="brand">CLOCK<span>VERSE</span></h1>
+        <span class="brand-badge">PRO v1.0</span>
       </div>
-          <div class="license-badge-container">
-        <button class="btn-magnetic" id="btn-license-modal">
+
+      <div class="topbar-actions">
+        <button id="btn-demo-platter" class="btn-demo-pill" title="Test instant recovery with real sample files">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          Instant Demo Platter
+        </button>
+
+        <div id="mode-toggle" class="mode-toggle" role="switch" aria-checked="false">
+          <span class="mode-label">CHRONO</span>
+          <div class="toggle-track"><div class="toggle-orb"></div></div>
+          <span class="mode-label">SECTOR</span>
+        </div>
+
+        <button class="btn-license" id="btn-license-modal">
           <span class="license-status-dot" id="license-indicator"></span>
           <span id="license-label">FREE TIER</span>
         </button>
       </div>
     </header>
 
+    <!-- SectorForge Card -->
     <section class="holo-card" id="scan-card">
-      <h2>SectorForge</h2>
-      <p class="dim">Drop a disk image or pick a target. Preview is free — restore is Pro.</p>
+      <div class="card-header-bar">
+        <h2>SectorForge Carver</h2>
+        <span class="card-pill">VAULTGUARD ACTIVE</span>
+      </div>
+      <p class="dim">Drop a disk image, pick a volume, or launch a deep carve scan to reconstruct deleted files.</p>
 
       <div class="scan-controls">
         <div class="scan-type-selector">
@@ -46,55 +63,75 @@
         </div>
 
         <div id="file-picker-section" class="file-picker-container">
-          <button id="btn-browse" class="btn-magnetic btn-browse" type="button">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button id="btn-browse" class="btn-secondary" type="button">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
             </svg>
-            Browse Image File
+            Browse Disk Image
           </button>
           <span id="selected-file" class="selected-file-label">No disk image selected</span>
           <input type="file" id="image-file-input" class="hidden" accept=".dd,.img,.raw,.E01" />
         </div>
 
         <div id="drive-warning" class="drive-warning hidden">
-          ⚠ Admin privileges required to read direct physical drives (\\.\PhysicalDrive0). VaultGuard read-only access is enforced.
+          ⚠ Direct raw physical drive access (\\.\PhysicalDrive0) requires Administrator execution. VaultGuard read-only access is enforced.
         </div>
       </div>
 
-      <button id="btn-scan" class="btn-magnetic">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polygon points="10 8 16 12 10 16 10 8"></polygon>
-        </svg>
-        Start Deep Scan
-      </button>
+      <div class="action-btn-row">
+        <button id="btn-scan" class="btn-primary">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polygon points="10 8 16 12 10 16 10 8"></polygon>
+          </svg>
+          Start Deep Scan
+        </button>
+      </div>
+
       <div id="recovery-window" class="warn hidden"></div>
     </section>
 
+    <!-- Recovery Log Card -->
     <section class="holo-card" id="terminal-card">
-      <div class="terminal-header">
-        <h2>Recovery Log</h2>
+      <div class="card-header-bar">
+        <h2>Recovery Console</h2>
         <div class="terminal-status">ENGINE READY</div>
       </div>
       <pre id="terminal" class="terminal"></pre>
     </section>
 
+    <!-- Restored Stats Card -->
     <section class="holo-card" id="stats-card">
-      <h2>Restored</h2>
+      <h2>Restored Entities</h2>
       <div id="counter" class="counter">0</div>
-      <div class="counter-sub">Verified entities reconstructed</div>
+      <div class="counter-sub">Verified entities reconstructed to disk</div>
     </section>
 
+    <!-- Preview Bay Card -->
     <section class="holo-card" id="preview-bay-card">
-      <h2>Preview Bay</h2>
-      <p class="dim">Recovered files — browse free, restore with Pro.</p>
+      <div class="card-header-bar">
+        <h2>Preview Bay</h2>
+        <span class="card-pill live">LIVE EXTRACTION</span>
+      </div>
+      <p class="dim">Recovered files previewable immediately. Click 'Restore' on any item to save to disk.</p>
       <div id="preview-grid-container"></div>
     </section>
 
+    <!-- Constellation Card -->
     <section class="holo-card" id="constellation-card">
-      <div class="terminal-header">
+      <div class="card-header-bar">
         <h2>Session Constellation</h2>
-        <div class="terminal-status" id="constellation-status">IDLE</div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button id="btn-ingest-log" class="btn-subtle" title="Import telemetry JSONL">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="17 8 12 3 7 8"></polyline>
+              <line x1="12" y1="3" x2="12" y2="15"></line>
+            </svg>
+            Ingest Log
+          </button>
+          <div class="terminal-status" id="constellation-status">IDLE</div>
+        </div>
       </div>
       <div id="constellation-grid" class="constellation">
         <div class="constellation__empty">
@@ -109,12 +146,14 @@
         <div class="meta-chip" id="meta-ts">t-0</div>
       </div>
     </section>
-      <section class="holo-card" id="time-capsule-card">
-      <div class="terminal-header">
+
+    <!-- Time Capsule Card -->
+    <section class="holo-card" id="time-capsule-card">
+      <div class="card-header-bar">
         <h2>🛡️ Time Capsule Insurance</h2>
         <div class="terminal-status">DAEMON ACTIVE</div>
       </div>
-      <p class="dim">Continuous background snapshots. Never lose work to accidental AI or editor deletions.</p>
+      <p class="dim">Continuous background snapshots. Never lose project files to accidental deletion or corrupted writes.</p>
       <div id="time-capsule-container"></div>
     </section>
   </main>
@@ -125,7 +164,7 @@
   <!-- License Modal -->
   <div id="license-modal" class="modal-backdrop hidden">
     <div class="modal-dialog holo-card">
-      <div class="terminal-header">
+      <div class="card-header-bar">
         <h2>⚡ Activate ClockVerse License</h2>
         <button class="btn-icon" id="btn-close-license">&times;</button>
       </div>
@@ -133,7 +172,7 @@
 
       <div class="license-input-group">
         <input type="text" id="license-key-input" placeholder="CLOCKVERSE-PRO-XXXXX-YYYYY" spellcheck="false" autocomplete="off" />
-        <button class="btn-magnetic" id="btn-activate-license">Activate</button>
+        <button class="btn-primary" id="btn-activate-license">Activate</button>
       </div>
       <div id="license-activation-status" class="dim" style="margin-top: 8px; font-size: 12px;"></div>
 
@@ -145,24 +184,23 @@
           <h4>Rescue Pass</h4>
           <div class="price">₹299</div>
           <p class="dim">7-day unlimited recovery pass. Perfect for one-time disasters.</p>
-          <a href="https://rzp.io/l/clockverse-rescue" target="_blank" class="btn-magnetic btn-buy">Buy ₹299</a>
+          <a href="https://rzp.io/l/clockverse-rescue" target="_blank" class="btn-buy">Buy ₹299</a>
         </div>
         <div class="pricing-card featured">
           <div class="badge-featured">POPULAR</div>
           <h4>Pro Lifetime</h4>
           <div class="price">₹1,999</div>
           <p class="dim">Permanent unlimited file recovery & Time Capsule on 1 device.</p>
-          <a href="https://rzp.io/l/clockverse-pro" target="_blank" class="btn-magnetic btn-buy">Buy ₹1,999</a>
+          <a href="https://rzp.io/l/clockverse-pro" target="_blank" class="btn-buy">Buy ₹1,999</a>
         </div>
         <div class="pricing-card">
           <h4>Studio Pack</h4>
           <div class="price">₹7,999</div>
           <p class="dim">Lifetime commercial license for up to 3 workstations.</p>
-          <a href="https://rzp.io/l/clockverse-studio" target="_blank" class="btn-magnetic btn-buy">Buy ₹7,999</a>
+          <a href="https://rzp.io/l/clockverse-studio" target="_blank" class="btn-buy">Buy ₹7,999</a>
         </div>
       </div>
     </div>
   </div>
-
 </body>
 </html>

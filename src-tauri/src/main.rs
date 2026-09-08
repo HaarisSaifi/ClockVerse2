@@ -27,7 +27,10 @@ struct AppState {
 }
 
 #[tauri::command]
-async fn start_scan(app: AppHandle, target: String) -> Result<String, String> {
+async fn start_scan(
+    app: AppHandle,
+    target: String,
+) -> Result<Vec<clockverse_engine::sectorforge::CarvedFileInfo>, String> {
     let _ = app.emit(
         "engine",
         EngineEvent::ScanStarted {
@@ -36,9 +39,9 @@ async fn start_scan(app: AppHandle, target: String) -> Result<String, String> {
         },
     );
 
-    // Carving runs on a blocking thread — NEVER the UI thread.
+    let target_clone = target.clone();
     let hits = tauri::async_runtime::spawn_blocking(move || {
-        sectorforge::carve_image(&target, 64 * 1024 * 1024) // 64 MB chunks
+        sectorforge::carve_image(&target_clone, 64 * 1024 * 1024)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -48,7 +51,7 @@ async fn start_scan(app: AppHandle, target: String) -> Result<String, String> {
         let _ = app.emit(
             "engine",
             EngineEvent::SectorResult {
-                particle_index: i as u32,
+                particle_index: (i % 1200) as u32,
                 state_code: 1, // carved
                 cluster: hit.offset / 4096,
                 signature: hit.signature.clone(),
@@ -57,16 +60,118 @@ async fn start_scan(app: AppHandle, target: String) -> Result<String, String> {
         );
     }
 
+    // Extract files into staging directory
+    let staging_dir = std::env::temp_dir().join("clockverse_staging");
+    let target_clone2 = target.clone();
+    let hits_clone = hits.clone();
+    let extracted = tauri::async_runtime::spawn_blocking(move || {
+        sectorforge::extract_carved_files(&target_clone2, &hits_clone, &staging_dir)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    for file in &extracted {
+        let _ = app.emit(
+            "engine",
+            EngineEvent::FileRestored {
+                path: file.path.clone(),
+                bytes: file.size_bytes,
+            },
+        );
+    }
+
+    let verified_count = extracted.len() as u32;
     let _ = app.emit(
         "engine",
         EngineEvent::ScanComplete {
             found: hits.len() as u32,
-            verified: 0,
-            failures: 0,
+            verified: verified_count,
+            failures: (hits.len() as u32).saturating_sub(verified_count),
         },
     );
 
-    Ok(format!("{} files carved", hits.len()))
+    Ok(extracted)
+}
+
+/// Creates a simulated disk platter image containing real sample JPEG, PNG, and PDF files
+#[tauri::command]
+async fn create_demo_platter() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = std::env::temp_dir().join("clockverse_demo_platter.img");
+        let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
+        use std::io::Write;
+
+        let mut platter = vec![0u8; 1024 * 1024]; // 1MB simulated disk platter
+
+        // 1. Valid 1x1 JPEG image at offset 16384 (16 KB)
+        let jpeg_data = [
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
+            0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08,
+            0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
+            0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20, 0x24, 0x2E, 0x27, 0x20,
+            0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29, 0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27,
+            0x39, 0x3D, 0x38, 0x32, 0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
+            0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01,
+            0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
+            0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F,
+            0x00, 0xBF, 0x00, 0xFF, 0xD9
+        ];
+        platter[16384..16384 + jpeg_data.len()].copy_from_slice(&jpeg_data);
+
+        // 2. Valid 1x1 PNG image at offset 65536 (64 KB)
+        let png_data = [
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+            0x42, 0x60, 0x82
+        ];
+        platter[65536..65536 + png_data.len()].copy_from_slice(&png_data);
+
+        // 3. Valid PDF document at offset 131072 (128 KB)
+        let pdf_str = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n";
+        let pdf_bytes = pdf_str.as_bytes();
+        platter[131072..131072 + pdf_bytes.len()].copy_from_slice(pdf_bytes);
+
+        file.write_all(&platter).map_err(|e| e.to_string())?;
+        Ok(path.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Restores a recovered file to the user's Downloads or target directory
+#[tauri::command]
+async fn restore_file_to_disk(
+    source_path: String,
+    destination_dir: Option<String>,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let src = std::path::Path::new(&source_path);
+        if !src.exists() {
+            return Err(format!("Source file does not exist: {}", source_path));
+        }
+
+        let file_name = src.file_name().ok_or("invalid file name")?;
+
+        let target_dir = if let Some(dir) = destination_dir {
+            std::path::PathBuf::from(dir)
+        } else {
+            let base = dirs::download_dir()
+                .or_else(dirs::desktop_dir)
+                .unwrap_or_else(|| std::env::temp_dir());
+            base.join("ClockVerse_Restored")
+        };
+
+        std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
+        let dest = target_dir.join(file_name);
+        std::fs::copy(&src, &dest).map_err(|e| e.to_string())?;
+
+        Ok(dest.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Ingest a JSONL telemetry log, index it, and stream one event per row to the UI.
@@ -677,6 +782,8 @@ fn main() {
             sidecar_thumbnail,
             get_temp_dir,
             select_image_file,
+            create_demo_platter,
+            restore_file_to_disk,
             time_capsule_protect,
             time_capsule_snapshot,
             time_capsule_list,

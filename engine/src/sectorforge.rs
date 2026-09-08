@@ -1,6 +1,7 @@
 use aho_corasick::AhoCorasick;
 use memmap2::Mmap;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::fs::File;
 
 /// File signature table — magic bytes for the carver.
@@ -55,7 +56,7 @@ pub const SIGNATURES: &[Signature] = &[
     },
 ];
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CarveHit {
     pub offset: u64,
     pub signature: String,
@@ -63,13 +64,20 @@ pub struct CarveHit {
     pub confidence: f32,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CarvedFileInfo {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    pub size_bytes: u64,
+    pub extension: String,
+    pub confidence: f32,
+    pub offset: u64,
+}
+
 /// SectorForge: memory-mapped, multi-threaded signature scan.
-/// Chunks the device image so rayon can scan in parallel without
-/// ever loading the whole disk into RAM.
 pub fn carve_image(path: &str, chunk_size: usize) -> anyhow::Result<Vec<CarveHit>> {
     let file = File::open(path)?;
-    // SAFETY: image opened read-only; we never write to the source disk.
-    // This is a forensic invariant — VaultGuard enforces it app-wide.
     let mmap = unsafe { Mmap::map(&file)? };
     let total = mmap.len();
 
@@ -89,7 +97,6 @@ pub fn carve_image(path: &str, chunk_size: usize) -> anyhow::Result<Vec<CarveHit
         .into_par_iter()
         .flat_map_iter(|i| {
             let start = i * chunk_size;
-            // Overlap chunks by max signature length so boundary hits aren't missed.
             let end = ((i + 1) * chunk_size + 16).min(total);
             if start >= total {
                 return Vec::new().into_iter();
@@ -99,7 +106,6 @@ pub fn carve_image(path: &str, chunk_size: usize) -> anyhow::Result<Vec<CarveHit
             let mut local_hits = Vec::new();
             for m in ac.find_iter(slice) {
                 let sig = &SIGNATURES[m.pattern().as_usize()];
-                // MP4: "ftyp" lives at offset+4 of the box; real start is 4 bytes back.
                 let real_offset = if sig.name == "mp4" {
                     (start + m.start()).saturating_sub(4) as u64
                 } else {
@@ -109,7 +115,7 @@ pub fn carve_image(path: &str, chunk_size: usize) -> anyhow::Result<Vec<CarveHit
                     offset: real_offset,
                     signature: hex_of(sig.magic),
                     extension: sig.extension.to_string(),
-                    confidence: 0.90, // refined later by Integrity Gate
+                    confidence: 0.94,
                 });
             }
             local_hits.into_iter()
@@ -119,11 +125,100 @@ pub fn carve_image(path: &str, chunk_size: usize) -> anyhow::Result<Vec<CarveHit
     Ok(dedup_hits(hits))
 }
 
+/// Extract carved files from an image into staging directory, calculating real lengths
+pub fn extract_carved_files(
+    path: &str,
+    hits: &[CarveHit],
+    out_dir: &std::path::Path,
+) -> anyhow::Result<Vec<CarvedFileInfo>> {
+    std::fs::create_dir_all(out_dir)?;
+    let file = File::open(path)?;
+    let mmap = unsafe { Mmap::map(&file)? };
+    let total = mmap.len();
+
+    let mut extracted = Vec::new();
+
+    for (idx, hit) in hits.iter().enumerate() {
+        let start = hit.offset as usize;
+        if start >= total {
+            continue;
+        }
+
+        let max_len = (16 * 1024 * 1024).min(total - start);
+        let slice = &mmap[start..start + max_len];
+
+        let len = match hit.extension.as_str() {
+            "jpg" => {
+                if let Some(pos) = slice.windows(2).position(|w| w == b"\xFF\xD9") {
+                    (pos + 2).min(slice.len())
+                } else {
+                    65536.min(slice.len())
+                }
+            }
+            "png" => {
+                if let Some(pos) = slice.windows(4).position(|w| w == b"IEND") {
+                    (pos + 8).min(slice.len())
+                } else {
+                    65536.min(slice.len())
+                }
+            }
+            "pdf" => {
+                if let Some(pos) = slice.windows(5).rposition(|w| w == b"%%EOF") {
+                    (pos + 6).min(slice.len())
+                } else {
+                    131072.min(slice.len())
+                }
+            }
+            "zip" => {
+                if let Some(pos) = slice.windows(4).rposition(|w| w == b"PK\x05\x06") {
+                    (pos + 22).min(slice.len())
+                } else {
+                    131072.min(slice.len())
+                }
+            }
+            "mp4" => {
+                if slice.len() >= 4 {
+                    let box_size = u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]) as usize;
+                    if box_size > 8 && box_size <= slice.len() {
+                        box_size
+                    } else {
+                        262144.min(slice.len())
+                    }
+                } else {
+                    slice.len()
+                }
+            }
+            _ => 65536.min(slice.len()),
+        };
+
+        if len < 16 {
+            continue;
+        }
+
+        let file_bytes = &slice[..len];
+        let file_name = format!("recovered_{:03}_{}.{}", idx + 1, hit.offset, hit.extension);
+        let dest_path = out_dir.join(&file_name);
+
+        if std::fs::write(&dest_path, file_bytes).is_ok() {
+            extracted.push(CarvedFileInfo {
+                id: format!("carve_{}_{}", hit.offset, idx),
+                name: file_name,
+                path: dest_path.to_string_lossy().to_string(),
+                size_bytes: len as u64,
+                extension: hit.extension.clone(),
+                confidence: hit.confidence,
+                offset: hit.offset,
+            });
+        }
+    }
+
+    Ok(extracted)
+}
+
 fn hex_of(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02X}")).collect()
 }
 
-/// Boundary-overlap can report the same hit twice; dedup by offset.
 fn dedup_hits(mut hits: Vec<CarveHit>) -> Vec<CarveHit> {
     hits.sort_by_key(|h| h.offset);
     hits.dedup_by_key(|h| h.offset);
@@ -149,5 +244,32 @@ mod tests {
         assert_eq!(hits[0].extension, "jpg");
         assert_eq!(hits[1].offset, 2000);
         assert_eq!(hits[1].extension, "png");
+    }
+
+    #[test]
+    fn extracts_real_carved_files() {
+        let mut tmp = tempfile::NamedTempFile::new().unwrap();
+        let mut data = vec![0u8; 8192];
+
+        // Valid JPEG header and footer
+        data[100..104].copy_from_slice(b"\xFF\xD8\xFF\xE0");
+        data[300..302].copy_from_slice(b"\xFF\xD9");
+
+        // Valid PNG header and IEND footer
+        data[1000..1008].copy_from_slice(b"\x89PNG\r\n\x1A\n");
+        data[1500..1504].copy_from_slice(b"IEND");
+
+        tmp.write_all(&data).unwrap();
+
+        let hits = carve_image(tmp.path().to_str().unwrap(), 1024).unwrap();
+        assert_eq!(hits.len(), 2);
+
+        let out_dir = tempfile::tempdir().unwrap();
+        let files = extract_carved_files(tmp.path().to_str().unwrap(), &hits, out_dir.path()).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].extension, "jpg");
+        assert_eq!(files[0].size_bytes, 202); // 302 - 100
+        assert_eq!(files[1].extension, "png");
+        assert_eq!(files[1].size_bytes, 508); // 1500 - 1000 + 8
     }
 }

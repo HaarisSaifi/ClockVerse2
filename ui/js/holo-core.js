@@ -1,10 +1,11 @@
 import * as THREE from '../vendor/three.module.js'; // three vendored for offline CSP
 
-const MAX_PARTICLES = 200_000;   // one draw call, GPU-instanced points
+const MAX_PARTICLES = 1_200;   // one draw call, GPU-instanced points
 
 export class HoloCore {
   #lastFrame = performance.now();
   #slowFrames = 0;
+  #dirty = false;
 
   constructor(canvas) {
     this.canvas = canvas;
@@ -89,7 +90,7 @@ export class HoloCore {
     const attr = this.points.geometry.attributes.recoveryState;
     if (!attr || particleIndex >= attr.count) return;
     attr.setX(particleIndex % attr.count, stateCode);
-    attr.needsUpdate = true;   // single buffer upload per batch
+    this.#dirty = true;
   }
 
   #bindLifecycle() {
@@ -128,7 +129,11 @@ export class HoloCore {
       this.#slowFrames = 0;
     }
 
-    this.points.rotation.y += 0.0004 * dt;  // delta-time orbit
+    if (this.#dirty && this.points.geometry?.attributes?.recoveryState) {
+      this.points.geometry.attributes.recoveryState.needsUpdate = true;
+      this.#dirty = false;
+    }
+    this.points.rotation.y += 0.00025 * dt;  // smooth quantum orbit
     this.renderer.render(this.scene, this.camera);
   }
 }

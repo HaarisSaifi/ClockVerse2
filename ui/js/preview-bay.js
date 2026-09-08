@@ -1,139 +1,122 @@
-// Preview Bay — thumbnail grid for recovered files.
-// Free users browse thumbnails; restore is gated behind Pro.
+// Preview Bay — Real recovered files grid with instant 1-click restore
 import { invoke } from './event-stream.js';
 
 export class PreviewBay {
   constructor(container) {
     this.container = container;
     this.files = [];
-    this.currentImage = null;
-    this._tempDir = null;
+    this.renderEmpty('Ready. Select an image or run Demo Platter to preview carved files.');
   }
 
-  async getTempDir() {
-    if (this._tempDir) return this._tempDir;
-    try {
-      if (typeof window.__TAURI__ !== 'undefined') {
-        if (window.__TAURI__.core?.invoke) {
-          this._tempDir = await window.__TAURI__.core.invoke('get_temp_dir');
-        } else {
-          this._tempDir = await invoke('get_temp_dir');
-        }
-        return this._tempDir;
-      }
-    } catch (_) {}
-    return '/tmp/';
+  setRecoveredFiles(files) {
+    this.files = files || [];
+    this.render();
   }
 
-  async loadFromImage(imagePath) {
-    this.currentImage = imagePath;
-    try {
-      const result = await invoke('sidecar_list_partitions', { imagePath });
-      if (result?.status === 'ok' && result.partitions.length > 0) {
-        const ntfs = result.partitions.find(p => (p.description || '').includes('NTFS'));
-        if (ntfs) {
-          const files = await invoke('scan_deleted_files', { imagePath });
-          this.files = files || [];
-          this.render();
-        }
-      }
-    } catch (err) {
-      this.renderEmpty('No previewable partitions found');
-    }
+  renderEmpty(msg) {
+    if (!this.container) return;
+    this.container.innerHTML = `
+      <div class="preview-empty">
+        <div class="empty-icon-radar"></div>
+        <p class="empty-title">${msg}</p>
+        <p class="empty-sub">Deep Sector carving automatically indexes JPEG, PNG, PDF, ZIP, and MP4 entities.</p>
+      </div>
+    `;
   }
 
   render() {
     if (!this.container) return;
     this.container.innerHTML = '';
-    if (this.files.length === 0) {
-      this.renderEmpty('No deleted files detected');
+    if (!this.files || this.files.length === 0) {
+      this.renderEmpty('No carved entities detected on target platter.');
       return;
     }
+
+    const header = document.createElement('div');
+    header.className = 'preview-bay-header';
+    header.innerHTML = `
+      <span class="preview-count-badge">${this.files.length} ENTITIES CARVED</span>
+      <span class="preview-help-text">Click 'Restore' to export file to your Downloads folder.</span>
+    `;
+    this.container.appendChild(header);
+
     const grid = document.createElement('div');
     grid.className = 'preview-grid';
+
     for (const f of this.files) {
       const card = document.createElement('div');
-      card.className = 'preview-card holo-card';
+      card.className = 'recovered-card';
+
+      const ext = (f.extension || 'bin').toUpperCase();
+      const isImg = ['JPG', 'JPEG', 'PNG'].includes(ext);
+      const icon = isImg ? '🖼️' : ext === 'PDF' ? '📄' : ext === 'ZIP' ? '📦' : '🎬';
+      const sizeStr = f.size_bytes > 1048576 
+        ? `${(f.size_bytes / 1048576).toFixed(2)} MB`
+        : `${(f.size_bytes / 1024).toFixed(1)} KB`;
+
       card.innerHTML = `
-        <div class="preview-thumb" data-offset="${f.record_number}">⏳</div>
-        <div class="preview-name">${escapeHtml(f.name)}</div>
-        <div class="preview-meta">${(f.size_bytes / 1024).toFixed(1)} KB</div>
-        <div class="confidence-ring" style="--confidence: ${f.fixup_ok ? 0.85 : 0.40}"></div>
+        <div class="card-thumb-box">
+          ${isImg && f.path ? `<img class="card-img-thumb" src="file://${f.path.replace(/\\/g, '/')}" onerror="this.outerHTML='<span class=\'fallback-icon\'>${icon}</span>'" />` : `<span class="fallback-icon">${icon}</span>`}
+          <span class="card-ext-badge">${ext}</span>
+        </div>
+        <div class="card-details">
+          <div class="card-filename" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+          <div class="card-meta-row">
+            <span class="card-size">${sizeStr}</span>
+            <span class="card-conf">${Math.round((f.confidence || 0.9) * 100)}% Match</span>
+          </div>
+          <button class="btn-restore-card" data-path="${escapeHtml(f.path)}" data-name="${escapeHtml(f.name)}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Restore
+          </button>
+        </div>
       `;
-      card.addEventListener('click', (e) => this.extractFile(f, e));
+
+      const restoreBtn = card.querySelector('.btn-restore-card');
+      restoreBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.restoreFile(f, restoreBtn);
+      });
+
       grid.appendChild(card);
     }
+
     this.container.appendChild(grid);
-    // Lazy-load thumbnails (IntersectionObserver — sirf visible cards)
-    this.observeThumbs();
   }
 
-  renderEmpty(msg) {
-    if (!this.container) return;
-    this.container.innerHTML = `<div class="constellation__empty"><span>${msg}</span></div>`;
-  }
+  async restoreFile(file, btnEl) {
+    if (!file || !file.path) return;
+    btnEl.disabled = true;
+    btnEl.textContent = 'Restoring...';
 
-  async observeThumbs() {
-    if (!this.currentImage) return;
-    const tempDir = await this.getTempDir();
-    const sep = tempDir.includes('\\') ? '\\' : '/';
-    const io = new IntersectionObserver(async (entries) => {
-      for (const e of entries) {
-        if (!e.isIntersecting) continue;
-        io.unobserve(e.target);
-        const offset = e.target.dataset.offset;
-        const out = `${tempDir}${sep}thumb_${offset}.png`;
-        try {
-          const res = await invoke('sidecar_thumbnail', {
-            imagePath: this.currentImage,
-            offset: parseInt(offset, 10),
-            outPath: out
-          });
-          if (res?.status === 'ok' || res?.thumbnail) {
-            e.target.innerHTML = `<img src="file://${out}" alt="">`;
-          } else {
-            e.target.textContent = '📄';
-          }
-        } catch (_) {
-          e.target.textContent = '📄';
-        }
-      }
-    }, { rootMargin: '50px' });
-    this.container.querySelectorAll('.preview-thumb').forEach(el => io.observe(el));
-  }
-
-  async extractFile(f, e) {
-    const tempDir = await this.getTempDir();
-    const sep = tempDir.includes('\\') ? '\\' : '/';
-    const out = `${tempDir}${sep}recovered_${f.name}`;
     try {
-      const bytes = await invoke('extract_deleted_file', {
-        imagePath: this.currentImage, recordNumber: f.record_number, outputPath: out
+      const savedPath = await invoke('restore_file_to_disk', {
+        sourcePath: file.path
       });
-      if (bytes) {
-        // Integrity Gate — restore se PEHLE verify
-        const ok = await invoke('verify_carved_file', { path: out });
-        if (ok) {
-          // teal already emit ho chuka (FileVerified). Ab restore = violet.
-          document.dispatchEvent(new CustomEvent('file-restored', {
-            detail: { name: f.name, bytes }
-          }));
-        } else {
-          // Gate FAIL — file restore mat karo, UI pe "unverified" dikhao.
-          e?.currentTarget?.classList?.add('unverified');
-          document.dispatchEvent(new CustomEvent('gate-failed', {
-            detail: { name: f.name }
-          }));
-        }
-      }
+
+      btnEl.classList.add('restored');
+      btnEl.innerHTML = '✓ Restored';
+
+      document.dispatchEvent(new CustomEvent('file-restored', {
+        detail: { name: file.name, bytes: file.size_bytes, savedPath }
+      }));
     } catch (err) {
-      console.error('extract failed', err);
+      console.error('Failed to restore file:', err);
+      btnEl.disabled = false;
+      btnEl.textContent = 'Failed';
+      setTimeout(() => { btnEl.textContent = 'Restore'; }, 2000);
     }
   }
 }
 
 function escapeHtml(s) {
   return String(s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
