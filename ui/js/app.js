@@ -117,7 +117,8 @@ onEngineEvent(handleEngineEvent);
 // File restored via Preview Bay → counter roll-up.
 document.addEventListener('file-restored', (e) => {
   counter.textContent = ++restored;
-  logLine(`RESTORED ${e.detail.name} → ${e.detail.bytes} bytes`);
+  const loc = e.detail.savedPath || 'Downloads\\ClockVerse_Restored';
+  logLine(`✓ RESTORED ${e.detail.name} (${e.detail.bytes} bytes) → ${loc}`);
 });
 
 // Integrity Gate failure → restore blocked, honourable honesty rule.

@@ -847,3 +847,25 @@ body[data-mode="sector"] .toggle-orb {
 }
 
 .hidden { display: none !important; }
+
+/* User POV Enhancements: Copyable text and responsive layout */
+.terminal, .card-filename, .capsule-path, .selected-file-label {
+  user-select: text;
+}
+
+@media (max-width: 1100px) {
+  #deck {
+    grid-template-columns: 1fr;
+    padding: 16px;
+    gap: 16px;
+  }
+  .topbar {
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .topbar-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}

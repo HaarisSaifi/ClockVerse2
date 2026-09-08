@@ -56,7 +56,7 @@ export class PreviewBay {
 
       card.innerHTML = `
         <div class="card-thumb-box">
-          ${isImg && f.path ? `<img class="card-img-thumb" src="file://${f.path.replace(/\\/g, '/')}" onerror="this.outerHTML='<span class=\'fallback-icon\'>${icon}</span>'" />` : `<span class="fallback-icon">${icon}</span>`}
+          ${isImg && f.path ? `<img class="card-img-thumb" src="${typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core?.convertFileSrc ? window.__TAURI__.core.convertFileSrc(f.path) : `file://${f.path.replace(/\\/g, '/')}`}" onerror="this.outerHTML='<span class=\'fallback-icon\'>${icon}</span>'" />` : `<span class="fallback-icon">${icon}</span>`}
           <span class="card-ext-badge">${ext}</span>
         </div>
         <div class="card-details">
@@ -99,7 +99,13 @@ export class PreviewBay {
       });
 
       btnEl.classList.add('restored');
-      btnEl.innerHTML = '✓ Restored';
+      btnEl.disabled = false;
+      btnEl.innerHTML = '✓ Open in Explorer';
+      btnEl.title = `Saved to: ${savedPath}. Click to open folder.`;
+      btnEl.onclick = (e) => {
+        e.stopPropagation();
+        invoke('open_in_explorer', { path: savedPath });
+      };
 
       document.dispatchEvent(new CustomEvent('file-restored', {
         detail: { name: file.name, bytes: file.size_bytes, savedPath }

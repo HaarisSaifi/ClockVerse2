@@ -489,6 +489,31 @@ async fn verify_carved_file(app: AppHandle, path: String) -> Result<bool, String
     .map_err(|e| e.to_string())?
 }
 
+/// Open a file or folder in Windows File Explorer
+#[tauri::command]
+async fn open_in_explorer(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let p = std::path::Path::new(&path);
+        let target = if p.is_file() {
+            p.parent().unwrap_or(p)
+        } else {
+            p
+        };
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("explorer")
+                .arg(target)
+                .creation_flags(0x08000000)
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn get_temp_dir() -> String {
     std::env::temp_dir().to_string_lossy().to_string()
@@ -787,6 +812,7 @@ fn main() {
             sidecar_list_partitions,
             sidecar_thumbnail,
             get_temp_dir,
+            open_in_explorer,
             select_image_file,
             create_demo_platter,
             restore_file_to_disk,
