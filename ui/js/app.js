@@ -489,3 +489,10 @@ const btnIngestLog = document.getElementById('btn-ingest-log');
 if (btnIngestLog) {
   btnIngestLog.addEventListener('click', () => jsonlPicker && jsonlPicker.click());
 }
+
+const btnCloseAlt = document.getElementById('btn-close-license-alt');
+if (btnCloseAlt) {
+  btnCloseAlt.addEventListener('click', () => {
+    if (licenseModal) licenseModal.classList.add('hidden');
+  });
+}

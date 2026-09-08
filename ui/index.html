@@ -161,45 +161,44 @@
   <input type="file" id="jsonl-picker" accept=".jsonl,.log,.txt" class="hidden" />
   <script type="module" src="js/app.js"></script>
 
-  <!-- License Modal -->
+  <!-- System Status / Pro License Modal -->
   <div id="license-modal" class="modal-backdrop hidden">
     <div class="modal-dialog holo-card">
       <div class="card-header-bar">
-        <h2>⚡ Activate ClockVerse License</h2>
+        <h2>⚡ ClockVerse Pro — System Engine Status</h2>
         <button class="btn-icon" id="btn-close-license">&times;</button>
       </div>
-      <p class="dim" style="margin: 12px 0;">Enter your license key received via email after purchasing your pass.</p>
+      <p class="dim" style="margin: 10px 0 18px 0;">All advanced forensic recovery, Time Capsule rollback, and carving pipelines are fully activated and unlocked.</p>
 
-      <div class="license-input-group">
-        <input type="text" id="license-key-input" placeholder="CLOCKVERSE-PRO-XXXXX-YYYYY" spellcheck="false" autocomplete="off" />
-        <button class="btn-primary" id="btn-activate-license">Activate</button>
-      </div>
-      <div id="license-activation-status" class="dim" style="margin-top: 8px; font-size: 12px;"></div>
-
-      <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.08); margin: 20px 0;" />
-
-      <h3 style="font-size: 14px; margin-bottom: 12px; color: var(--accent-active);">Need a License? Select a Pass:</h3>
-      <div class="pricing-grid">
-        <div class="pricing-card">
-          <h4>Rescue Pass</h4>
-          <div class="price">₹299</div>
-          <p class="dim">7-day unlimited recovery pass. Perfect for one-time disasters.</p>
-          <a href="https://rzp.io/l/clockverse-rescue" target="_blank" class="btn-buy">Buy ₹299</a>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-emerald); font-weight: 700; margin-bottom: 4px;">LICENSE TIER</div>
+          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">PRO (UNLOCKED)</div>
+          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Unlimited Carving & Restores</div>
         </div>
-        <div class="pricing-card featured">
-          <div class="badge-featured">POPULAR</div>
-          <h4>Pro Lifetime</h4>
-          <div class="price">₹1,999</div>
-          <p class="dim">Permanent unlimited file recovery & Time Capsule on 1 device.</p>
-          <a href="https://rzp.io/l/clockverse-pro" target="_blank" class="btn-buy">Buy ₹1,999</a>
+
+        <div style="background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.25); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-prism); font-weight: 700; margin-bottom: 4px;">TIME CAPSULE</div>
+          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">ACTIVE (CAS SHA-256)</div>
+          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Zero-Loss Byte Rollback</div>
         </div>
-        <div class="pricing-card">
-          <h4>Studio Pack</h4>
-          <div class="price">₹7,999</div>
-          <p class="dim">Lifetime commercial license for up to 3 workstations.</p>
-          <a href="https://rzp.io/l/clockverse-studio" target="_blank" class="btn-buy">Buy ₹7,999</a>
+
+        <div style="background: rgba(246, 211, 101, 0.08); border: 1px solid rgba(246, 211, 101, 0.25); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-solar); font-weight: 700; margin-bottom: 4px;">SECTORFORGE</div>
+          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">MULTI-CORE CARVER</div>
+          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Parallel Memory-Mapped I/O</div>
+        </div>
+
+        <div style="background: rgba(255, 94, 58, 0.08); border: 1px solid rgba(255, 94, 58, 0.25); border-radius: 10px; padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-plasma); font-weight: 700; margin-bottom: 4px;">VAULTGUARD</div>
+          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">STRICT READ-ONLY</div>
+          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Zero Write Invariant Enforced</div>
         </div>
       </div>
+
+      <button class="btn-secondary" id="btn-close-license-alt" style="width: 100%; justify-content: center;">
+        Close Status
+      </button>
     </div>
   </div>
 </body>

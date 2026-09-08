@@ -40,12 +40,20 @@ async fn start_scan(
     );
 
     let target_clone = target.clone();
+    let target_for_err = target.clone();
     let hits = tauri::async_runtime::spawn_blocking(move || {
         sectorforge::carve_image(&target_clone, 64 * 1024 * 1024)
     })
     .await
     .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+        let err_str = e.to_string();
+        if target_for_err.contains("PhysicalDrive") && (err_str.contains("Access is denied") || err_str.contains("os error 5")) {
+            "Administrator privileges required to read direct physical drives (\\\\.\\PhysicalDrive0). Right-click ClockVerse and choose 'Run as administrator', or scan a disk image / use Instant Demo Platter.".to_string()
+        } else {
+            err_str
+        }
+    })?;
 
     for (i, hit) in hits.iter().enumerate() {
         let _ = app.emit(
