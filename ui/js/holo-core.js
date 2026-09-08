@@ -8,23 +8,30 @@ export class HoloCore {
 
   constructor(canvas) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({
-      canvas,
-      antialias: false,
-      powerPreference: 'high-performance',
-      alpha: true,
-    });
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
-    this.camera.position.z = 7.5;
-    this.camera.position.y = 1.2;
-    this.camera.lookAt(0, 0, 0);
-
     this.quality = 1;             // auto-tier: 1 = full, 0.5 = halved
-    this.#buildPointCloud();
-    this.#bindLifecycle();
-    this.#tick = this.#tick.bind(this);
-    this.renderer.setAnimationLoop(this.#tick);
+    try {
+      if (!canvas) {
+        console.warn('HoloCore: canvas element not found');
+        return;
+      }
+      this.renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: false,
+        powerPreference: 'high-performance',
+        alpha: true,
+      });
+      this.scene = new THREE.Scene();
+      this.camera = new THREE.PerspectiveCamera(55, (window.innerWidth || 1440) / (window.innerHeight || 900), 0.1, 100);
+      this.camera.position.z = 7.5;
+      this.camera.position.y = 1.2;
+      this.camera.lookAt(0, 0, 0);
+
+      this.#buildPointCloud();
+      this.#bindLifecycle();
+      this.renderer.setAnimationLoop(() => this.#tick());
+    } catch (err) {
+      console.warn('HoloCore WebGL initialization warning:', err);
+    }
   }
 
   #buildPointCloud() {
@@ -78,8 +85,9 @@ export class HoloCore {
 
   // Called ONLY from real engine events. Batched attribute upload.
   ignite(particleIndex, stateCode) {
+    if (!this.points || !this.points.geometry) return;
     const attr = this.points.geometry.attributes.recoveryState;
-    if (particleIndex >= attr.count) return;
+    if (!attr || particleIndex >= attr.count) return;
     attr.setX(particleIndex % attr.count, stateCode);
     attr.needsUpdate = true;   // single buffer upload per batch
   }
@@ -87,20 +95,26 @@ export class HoloCore {
   #bindLifecycle() {
     // Zero idle GPU burn: pause when hidden (blueprint rule)
     document.addEventListener('visibilitychange', () => {
-      this.renderer.setAnimationLoop(document.hidden ? null : this.#tick);
+      if (this.renderer) {
+        this.renderer.setAnimationLoop(document.hidden ? null : () => this.#tick());
+      }
     });
 
     window.addEventListener('resize', () => {
+      if (!this.camera || !this.renderer) return;
       this.camera.aspect = window.innerWidth / window.innerHeight;
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(window.innerWidth, window.innerHeight);
     });
 
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    if (this.renderer) {
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    }
   }
 
   #tick() {
+    if (!this.renderer || !this.scene || !this.camera || !this.points) return;
     const now = performance.now();
     const dt = now - this.#lastFrame;
     this.#lastFrame = now;

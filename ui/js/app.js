@@ -169,7 +169,12 @@ if (scanBtn) {
     const scanType = scanTypeRadio ? scanTypeRadio.value : 'image';
 
     if (scanType === 'image' && !window.selectedImagePath) {
-      alert('Please select a disk image file (.dd, .img, .raw) first.');
+      if (browseBtn) {
+        logLine('Prompting image file selection...');
+        browseBtn.click();
+      } else {
+        alert('Please select a disk image file (.dd, .img, .raw) first.');
+      }
       return;
     }
 

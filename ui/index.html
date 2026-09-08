@@ -32,6 +32,35 @@
     <section class="holo-card" id="scan-card">
       <h2>SectorForge</h2>
       <p class="dim">Drop a disk image or pick a target. Preview is free — restore is Pro.</p>
+
+      <div class="scan-controls">
+        <div class="scan-type-selector">
+          <label class="radio-label">
+            <input type="radio" name="scan-type" value="image" checked />
+            <span>Forensic Image (.dd, .raw, .img, .E01)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="scan-type" value="drive" />
+            <span>Physical Drive (Admin)</span>
+          </label>
+        </div>
+
+        <div id="file-picker-section" class="file-picker-container">
+          <button id="btn-browse" class="btn-magnetic btn-browse" type="button">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            Browse Image File
+          </button>
+          <span id="selected-file" class="selected-file-label">No disk image selected</span>
+          <input type="file" id="image-file-input" class="hidden" accept=".dd,.img,.raw,.E01" />
+        </div>
+
+        <div id="drive-warning" class="drive-warning hidden">
+          ⚠ Admin privileges required to read direct physical drives (\\.\PhysicalDrive0). VaultGuard read-only access is enforced.
+        </div>
+      </div>
+
       <button id="btn-scan" class="btn-magnetic">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <circle cx="12" cy="12" r="10"></circle>

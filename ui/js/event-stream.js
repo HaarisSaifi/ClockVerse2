@@ -8,9 +8,10 @@ let mockLicense = {
 };
 // In-memory mock folders for browser dev
 const mockCapsuleFolders = [];
-// Tauri event bridge. In browser-dev mode, falls back to a mock feed
-// so UI work never blocks on the Rust engine.
-const isTauri = typeof window.__TAURI__ !== 'undefined';
+
+function getTauri() {
+  return typeof window !== 'undefined' ? window.__TAURI__ : undefined;
+}
 
 let mockEmitter = null;
 
@@ -44,9 +45,9 @@ function mockApplyOp(path, op, ts) {
 }
 
 export async function onEngineEvent(handler) {
-  if (isTauri) {
-    const { listen } = window.__TAURI__.event;
-    return await listen('engine', (e) => handler(e.payload));
+  const tauri = getTauri();
+  if (tauri && tauri.event?.listen) {
+    return await tauri.event.listen('engine', (e) => handler(e.payload));
   }
 
   // Browser dev mode: hold reference to handler for mock invoke triggers
@@ -70,7 +71,9 @@ export async function onEngineEvent(handler) {
 }
 
 export async function invoke(cmd, args) {
-  if (isTauri) return window.__TAURI__.core.invoke(cmd, args);
+  const tauri = getTauri();
+  const invokeFn = tauri?.core?.invoke || tauri?.invoke;
+  if (invokeFn) return invokeFn(cmd, args);
   console.log('[mock invoke]', cmd, args);
 
   if (cmd === 'start_scan' && mockEmitter) {

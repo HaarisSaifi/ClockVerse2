@@ -17,13 +17,23 @@ pub struct Sidecar {
 
 impl Sidecar {
     pub async fn spawn(python: &str, script: &str) -> anyhow::Result<Self> {
-        let mut child = Command::new(python)
-            .arg(script)
+        if !std::path::Path::new(script).exists() {
+            anyhow::bail!("Sidecar script not found at path: {}", script);
+        }
+
+        let mut cmd = Command::new(python);
+        cmd.arg(script)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .kill_on_drop(true)
-            .spawn()?;
+            .stderr(Stdio::piped())
+            .kill_on_drop(true);
+
+        #[cfg(windows)]
+        {
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        }
+
+        let mut child = cmd.spawn()?;
 
         let stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();

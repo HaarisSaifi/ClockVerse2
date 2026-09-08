@@ -871,3 +871,81 @@ body[data-mode="sector"] .toggle-orb {
     height: 260px;
   }
 }
+
+/* ===== SectorForge Scan Controls ===== */
+.scan-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.scan-type-selector {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.radio-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  transition: all 150ms ease;
+}
+
+.radio-label:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--accent-active-dim);
+}
+
+.radio-label input[type="radio"] {
+  accent-color: var(--accent-active);
+  cursor: pointer;
+}
+
+.file-picker-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-browse {
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #fff !important;
+  border: 1px solid var(--border-subtle) !important;
+  box-shadow: none !important;
+}
+
+.btn-browse:hover {
+  background: rgba(255, 255, 255, 0.14) !important;
+  border-color: var(--accent-active) !important;
+}
+
+.selected-file-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-active);
+  word-break: break-all;
+  max-width: 360px;
+}
+
+.drive-warning {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent-solar);
+  background: rgba(246, 211, 101, 0.08);
+  border: 1px solid rgba(246, 211, 101, 0.25);
+  border-radius: 8px;
+  padding: 10px 14px;
+  line-height: 1.5;
+}

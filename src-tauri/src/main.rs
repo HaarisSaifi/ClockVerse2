@@ -588,32 +588,44 @@ fn main() {
     let index = EventIndex::open(db_path.to_str().expect("invalid db path"))
         .expect("failed to open persistent event index");
 
-    // Problem #3 fix: Resolve sidecar path relative to exe or cwd
+    // Problem #3 fix: Multi-candidate sidecar path resolution
     let exe_dir = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
-    let sidecar_path = exe_dir.join("sidecar/sidecar.py");
-    let sidecar_path = if sidecar_path.exists() {
-        sidecar_path
-    } else {
-        // Dev fallback: assume running from workspace root
-        std::path::PathBuf::from("sidecar/sidecar.py")
-    };
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
 
-    // Problem #3 fix: Python executable detection (Windows vs Unix)
+    let candidates = [
+        exe_dir.join("sidecar/sidecar.py"),
+        exe_dir.join("../../sidecar/sidecar.py"),
+        exe_dir.join("../sidecar/sidecar.py"),
+        cwd.join("sidecar/sidecar.py"),
+        std::path::PathBuf::from("sidecar/sidecar.py"),
+    ];
+
+    let sidecar_path = candidates.into_iter().find(|p| p.exists());
+
+    // Python executable detection (Windows vs Unix)
     let python_cmd = if cfg!(windows) { "python" } else { "python3" };
 
-    let sidecar: Option<Sidecar> = tauri::async_runtime::block_on(async {
-        match Sidecar::spawn(python_cmd, sidecar_path.to_str().unwrap()).await {
-            Ok(s) => Some(s),
-            Err(e) => {
-                eprintln!("[WARN] Forensic sidecar unavailable: {}. Running without sidecar.", e);
-                None
+    let sidecar: Option<Sidecar> = if let Some(path) = sidecar_path {
+        tauri::async_runtime::block_on(async {
+            match Sidecar::spawn(python_cmd, path.to_str().unwrap()).await {
+                Ok(s) => {
+                    println!("[INFO] Forensic sidecar connected at {:?}", path);
+                    Some(s)
+                }
+                Err(e) => {
+                    eprintln!("[WARN] Forensic sidecar unavailable: {}. Running without sidecar.", e);
+                    None
+                }
             }
-        }
-    });
+        })
+    } else {
+        eprintln!("[WARN] sidecar.py not found in any candidate path. Running in standalone native mode.");
+        None
+    };
 
     let time_capsule = Arc::new(StdMutex::new(TimeCapsule::new()));
 
