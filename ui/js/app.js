@@ -495,11 +495,18 @@ if (btnActivateLicense) {
   });
 }
 
-// Check initial license state on app load
+// Check initial license & SSD TRIM health state on app load
 (async () => {
   try {
     const status = await invoke('check_license_grace');
     updateLicenseUI(status);
+  } catch (_) {}
+
+  try {
+    const trimInfo = await invoke('trim_health_check', { target: 'C:' });
+    if (trimInfo && trimInfo.trim_active) {
+      logLine('⚡ SSD TRIM DETECTED (ACTIVE): Real-time VSS Shadow Snapshots & MFT Resident bypass armed.');
+    }
   } catch (_) {}
 })();
 

@@ -47,16 +47,22 @@ async fn start_scan(
     let path_obj = std::path::PathBuf::from(&clean_target);
     let staging_dir = std::env::temp_dir().join("clockverse_staging");
 
-    // Case 1: Folder / Directory Scan
+    // Case 1: Folder / Directory Scan (Direct Carving + VSS Shadow Copy Extraction)
     if path_obj.is_dir() {
         let dir_str = clean_target.clone();
         let staging_clone = staging_dir.clone();
-        let extracted = tauri::async_runtime::spawn_blocking(move || {
+        let mut extracted = tauri::async_runtime::spawn_blocking(move || {
             sectorforge::carve_folder(&dir_str, &staging_clone)
         })
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+
+        // Query Windows Volume Shadow Copies for untrimmed previous versions
+        let dir_str2 = clean_target.clone();
+        if let Ok(vss_files) = vss_scan_folder(dir_str2).await {
+            extracted.extend(vss_files);
+        }
 
         for (i, file) in extracted.iter().enumerate() {
             let _ = app.emit(
@@ -330,10 +336,176 @@ async fn chrono_time_travel(
     Ok(serde_json::json!({ "as_of_micros": as_of_micros, "files": files }))
 }
 
+/// Real TRIM detection & health check via Windows fsutil
 #[tauri::command]
-fn trim_health_check(target: String) -> String {
-    // Phase 2: real TRIM detection via OS APIs (Windows: FSCTL, macOS: diskutil).
-    format!("target={target} trim=unknown — treat as SSD: minimize writes")
+async fn trim_health_check(target: String) -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let output = std::process::Command::new("fsutil")
+                .args(["behavior", "query", "disabledeletenotify"])
+                .creation_flags(0x08000000)
+                .output();
+
+            let (ntfs_trim_enabled, raw_out) = match output {
+                Ok(out) => {
+                    let text = String::from_utf8_lossy(&out.stdout).to_string();
+                    let enabled = text.contains("NTFS DisableDeleteNotify = 0");
+                    (enabled, text)
+                }
+                Err(e) => (false, e.to_string()),
+            };
+
+            let drive_letter = target.chars().next().unwrap_or('C').to_ascii_uppercase();
+
+            Ok(serde_json::json!({
+                "trim_active": ntfs_trim_enabled,
+                "drive": format!("{}:", drive_letter),
+                "status": if ntfs_trim_enabled { "TRIM_ACTIVE" } else { "TRIM_INACTIVE" },
+                "summary": if ntfs_trim_enabled {
+                    "⚡ SSD TRIM is ACTIVE: Deleted blocks are queued for zeroing. ClockVerse VSS & MFT engines engaged."
+                } else {
+                    "✓ TRIM is inactive/paused: Sectors remain intact until overwritten."
+                },
+                "raw": raw_out.trim()
+            }))
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(serde_json::json!({ "trim_active": false, "status": "UNKNOWN" }))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Queries Windows Volume Shadow Copies for any untrimmed deleted previous versions of a folder
+#[tauri::command]
+async fn vss_scan_folder(
+    folder_path: String,
+) -> Result<Vec<clockverse_engine::sectorforge::CarvedFileInfo>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let clean = folder_path.trim().trim_matches('"').to_string();
+        if clean.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let drive_letter = clean.chars().next().unwrap_or('C').to_ascii_uppercase();
+            let staging = std::env::temp_dir().join("clockverse_staging").join("vss");
+            std::fs::create_dir_all(&staging).ok();
+
+            let rel_path = if clean.len() > 3 {
+                clean[3..].trim_start_matches('\\')
+            } else {
+                ""
+            };
+
+            let script = format!(
+                r#"
+                $drive = "{}:"
+                $rel = "{}"
+                $staging = "{}"
+                $extracted = @()
+
+                try {{
+                    $vssOut = vssadmin list shadows /for=$drive 2>$null
+                    if ($LASTEXITCODE -eq 0 -and $vssOut) {{
+                        $shadowVolumes = @()
+                        foreach ($line in ($vssOut -split "`r?`n")) {{
+                            if ($line -match "Shadow Copy Volume: (\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+)") {{
+                                $shadowVolumes += $matches[1]
+                            }}
+                        }}
+
+                        foreach ($sh in $shadowVolumes | Select-Object -Last 2) {{
+                            $sourceDir = Join-Path $sh $rel
+                            if (Test-Path -LiteralPath $sourceDir) {{
+                                $items = Get-ChildItem -LiteralPath $sourceDir -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 30
+                                foreach ($it in $items) {{
+                                    $destName = "vss_" + $it.Name
+                                    $destPath = Join-Path $staging $destName
+                                    Copy-Item -LiteralPath $it.FullName -Destination $destPath -Force -ErrorAction SilentlyContinue
+                                    if (Test-Path -LiteralPath $destPath) {{
+                                        $extracted += [PSCustomObject]@{{
+                                            name = "[VSS] " + $it.Name
+                                            path = $destPath
+                                            size = $it.Length
+                                            ext = $it.Extension.TrimStart('.').ToLower()
+                                        }}
+                                    }}
+                                }}
+                            }}
+                        }}
+                    }}
+                }} catch {{}}
+
+                if ($extracted.Count -gt 0) {{
+                    $extracted | ConvertTo-Json -Compress
+                }} else {{
+                    Write-Output "[]"
+                }}
+                "#,
+                drive_letter,
+                rel_path.replace('\\', "\\\\"),
+                staging.to_string_lossy().replace('\\', "\\\\")
+            );
+
+            let output = std::process::Command::new("powershell")
+                .args(["-NoProfile", "-Command", &script])
+                .creation_flags(0x08000000)
+                .output();
+
+            let mut results = Vec::new();
+            if let Ok(out) = output {
+                let json_text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_text) {
+                    if let Some(arr) = val.as_array() {
+                        for (i, item) in arr.iter().enumerate() {
+                            let name = item["name"].as_str().unwrap_or("vss_file").to_string();
+                            let path = item["path"].as_str().unwrap_or("").to_string();
+                            let size = item["size"].as_u64().unwrap_or(0);
+                            let ext = item["ext"].as_str().unwrap_or("bin").to_string();
+                            results.push(clockverse_engine::sectorforge::CarvedFileInfo {
+                                id: format!("vss_{}", i),
+                                name,
+                                path,
+                                size_bytes: size,
+                                extension: ext,
+                                confidence: 1.0,
+                                offset: 0,
+                            });
+                        }
+                    } else if val.is_object() {
+                        let name = val["name"].as_str().unwrap_or("vss_file").to_string();
+                        let path = val["path"].as_str().unwrap_or("").to_string();
+                        let size = val["size"].as_u64().unwrap_or(0);
+                        let ext = val["ext"].as_str().unwrap_or("bin").to_string();
+                        results.push(clockverse_engine::sectorforge::CarvedFileInfo {
+                            id: "vss_0".to_string(),
+                            name,
+                            path,
+                            size_bytes: size,
+                            extension: ext,
+                            confidence: 1.0,
+                            offset: 0,
+                        });
+                    }
+                }
+            }
+
+            Ok(results)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(Vec::new())
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -857,6 +1029,7 @@ fn main() {
         .manage(Arc::new(TokioMutex::new(sidecar)) as SharedSidecar)
         .invoke_handler(tauri::generate_handler![
             start_scan,
+            vss_scan_folder,
             trim_health_check,
             chrono_ingest,
             session_summary,

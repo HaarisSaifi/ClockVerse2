@@ -89,6 +89,14 @@ export class PreviewBay {
       card.className = 'recovered-card';
 
       const ext = (f.extension || 'bin').toUpperCase();
+      const isVss = f.name && f.name.includes('[VSS]');
+      const isMft = f.name && f.name.includes('[MFT]');
+      const badgeText = isVss ? 'VSS SHADOW' : isMft ? 'MFT RESIDENT' : ext;
+      const badgeStyle = isVss 
+        ? 'background: var(--accent-prism); color: #000; font-weight: 700; font-size: 9px; padding: 2px 6px;' 
+        : isMft 
+        ? 'background: var(--accent-emerald); color: #000; font-weight: 700; font-size: 9px; padding: 2px 6px;' 
+        : '';
       const isImg = ['JPG', 'JPEG', 'PNG'].includes(ext);
       const icon = isImg ? '🖼️' : ext === 'PDF' ? '📄' : ext === 'ZIP' ? '📦' : '🎬';
       const sizeStr = f.size_bytes > 1048576 
@@ -98,7 +106,7 @@ export class PreviewBay {
       card.innerHTML = `
         <div class="card-thumb-box">
           ${isImg && f.path ? `<img class="card-img-thumb" src="${typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.core?.convertFileSrc ? window.__TAURI__.core.convertFileSrc(f.path) : `file://${f.path.replace(/\\/g, '/')}`}" onerror="this.outerHTML='<span class=\'fallback-icon\'>${icon}</span>'" />` : `<span class="fallback-icon">${icon}</span>`}
-          <span class="card-ext-badge">${ext}</span>
+          <span class="card-ext-badge" style="${badgeStyle}">${badgeText}</span>
         </div>
         <div class="card-details">
           <div class="card-filename" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>

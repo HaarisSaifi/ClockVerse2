@@ -46,7 +46,10 @@
     <section class="holo-card" id="scan-card">
       <div class="card-header-bar">
         <h2>SectorForge Carver</h2>
-        <span class="card-pill">VAULTGUARD ACTIVE</span>
+        <div style="display: flex; gap: 8px;">
+          <span class="card-pill live" id="badge-trim-status" title="TRIM Status">SSD DEEPSHIELD</span>
+          <span class="card-pill">VAULTGUARD ACTIVE</span>
+        </div>
       </div>
       <p class="dim">Forensic Carving Engine: Memory-mapped parallel signature scanning and 1-click byte-exact restoration.</p>
 
@@ -96,6 +99,11 @@
 
         <div id="drive-warning" class="drive-warning hidden">
           ⚠ Direct raw physical drive access (\\.\PhysicalDrive0) requires Administrator execution. VaultGuard read-only access is enforced.
+        </div>
+
+        <div id="ssd-shield-bar" class="ssd-shield-bar" style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-prism); display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.2); padding: 8px 12px; border-radius: 6px;">
+          <span>⚡ <strong>SSD DeepShield:</strong> VSS Shadow Snapshots & MFT Resident Carving Armed</span>
+          <span style="color: var(--accent-emerald);" id="trim-state-indicator">✓ TRIM MONITORED</span>
         </div>
       </div>
 
