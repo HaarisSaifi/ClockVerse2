@@ -73,17 +73,20 @@ pub fn parse_boot_sector(bs: &[u8]) -> Option<NtfsGeometry> {
     }
     let sector_size = u16le(bs, 0x0B) as usize;
     let spc = bs[0x0D] as u64;
-    if sector_size == 0 || spc == 0 {
+    if !matches!(sector_size, 512 | 1024 | 2048 | 4096) || !spc.is_power_of_two() || spc > 128 {
         return None;
     }
     let mft_lcn = u64le(bs, 0x30);
     let rec_clusters = bs[0x40] as i8;
     // Negative value = record size is 2^|v| bytes (0xF6 → 1024)
     let record_size = if rec_clusters < 0 {
-        1usize << (-rec_clusters as u32)
+        1usize.checked_shl(-(rec_clusters as i16) as u32)?
     } else {
         rec_clusters as usize * sector_size * spc as usize
     };
+    if !(512..=65536).contains(&record_size) {
+        return None;
+    }
     Some(NtfsGeometry {
         sector_size,
         cluster_size: sector_size as u64 * spc,
@@ -96,12 +99,12 @@ pub fn parse_boot_sector(bs: &[u8]) -> Option<NtfsGeometry> {
 /// Har sector ke last 2 bytes USN hone chahiye; originals USA mein saved hote hain.
 /// Returns false = record partially overwritten (trust kam, parse phir bhi).
 pub fn apply_fixup(record: &mut [u8], sector_size: usize) -> bool {
-    if record.len() < 48 {
+    if record.len() < 48 || sector_size < 2 {
         return false;
     }
     let usa_off = u16le(record, 4) as usize;
     let usa_count = u16le(record, 6) as usize;
-    if usa_count < 1 || usa_off + usa_count * 2 > record.len() {
+    if usa_count != record.len() / sector_size + 1 || usa_off + usa_count * 2 > record.len() {
         return false;
     }
     let usn = [record[usa_off], record[usa_off + 1]];
@@ -133,7 +136,7 @@ pub fn parse_data_runs(mut data: &[u8]) -> Vec<DataRun> {
         let len_bytes = (header & 0x0F) as usize;
         let off_bytes = (header >> 4) as usize;
         data = &data[1..];
-        if data.len() < len_bytes + off_bytes {
+        if len_bytes == 0 || len_bytes > 8 || off_bytes > 8 || data.len() < len_bytes + off_bytes {
             break;
         }
         let mut length: u64 = 0;
@@ -151,8 +154,21 @@ pub fn parse_data_runs(mut data: &[u8]) -> Vec<DataRun> {
                 offset |= -1i64 << (off_bytes * 8);
             }
         }
-        lcn += offset;
-        runs.push(DataRun { lcn, length });
+        if length == 0 {
+            break;
+        }
+        if off_bytes == 0 {
+            runs.push(DataRun { lcn: -1, length });
+        } else {
+            let Some(next) = lcn.checked_add(offset) else {
+                break;
+            };
+            if next < 0 {
+                break;
+            }
+            lcn = next;
+            runs.push(DataRun { lcn, length });
+        }
         data = &data[len_bytes + off_bytes..];
     }
     runs
@@ -216,7 +232,7 @@ pub fn parse_record(raw: &[u8], record_number: u64, sector_size: usize) -> Optio
             break;
         }
         let attr_len = u32le(&buf, off + 4) as usize;
-        if attr_len == 0 || off + attr_len > buf.len() {
+        if attr_len < 24 || off + attr_len > buf.len() {
             break; // corrupt chain — stop, jo mila woh valid hai
         }
         let non_resident = buf[off + 8] != 0;
@@ -226,16 +242,16 @@ pub fn parse_record(raw: &[u8], record_number: u64, sector_size: usize) -> Optio
             (ATTR_FILE_NAME, false) => {
                 let vlen = u32le(&buf, off + 16) as usize;
                 let voff = u16le(&buf, off + 20) as usize;
-                if voff + vlen <= attr_len {
+                if voff >= 24 && voff + vlen <= attr_len {
                     if let Some(fna) = parse_file_name(&buf[off + voff..off + voff + vlen]) {
                         rec.file_names.push(fna);
                     }
                 }
             }
-            (ATTR_DATA, true) if !has_name => {
+            (ATTR_DATA, true) if !has_name && attr_len >= 64 => {
                 // default stream only (named ADS streams skip — Phase 2.5)
                 let runs_off = u16le(&buf, off + 32) as usize;
-                if runs_off < attr_len {
+                if runs_off >= 64 && runs_off < attr_len {
                     rec.data_runs = parse_data_runs(&buf[off + runs_off..off + attr_len]);
                 }
             }
@@ -252,7 +268,7 @@ pub fn parse_record(raw: &[u8], record_number: u64, sector_size: usize) -> Optio
 /// Scan $MFT sequentially; har parsed record callback ko milta hai.
 /// Returns: deleted-record count (recovery candidates).
 ///
-/// NOTE: yeh $MFT ko contiguous maanta hai — 95%+ real volumes pe sahi.
+/// Legacy helper assumes a contiguous $MFT; the active workbench scans records across the image.
 /// Fragmented $MFT (uske apne data runs se map karna) Phase 2.5 mein.
 pub fn scan_mft<F: FnMut(&MftRecord)>(
     image: &File,

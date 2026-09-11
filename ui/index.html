@@ -1,234 +1,270 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ClockVerse - Temporal Forensic Engine</title>
-  <link rel="stylesheet" href="tokens.css" />
-  <link rel="stylesheet" href="holo.css" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-</head>
-<body data-mode="chrono">
-  <canvas id="holo-canvas"></canvas>
-
-  <main id="deck">
-    <!-- Topbar -->
-    <header class="topbar">
-      <div class="brand-group">
-        <h1 class="brand">CLOCK<span>VERSE</span></h1>
-        <span class="brand-badge">PRO v1.0</span>
-      </div>
-
-      <div class="topbar-actions">
-        <button id="btn-demo-platter" class="btn-demo-pill" title="Test instant recovery with real sample files">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
-          Instant Demo Platter
-        </button>
-
-        <div id="mode-toggle" class="mode-toggle" role="switch" aria-checked="false">
-          <span class="mode-label">CHRONO</span>
-          <div class="toggle-track"><div class="toggle-orb"></div></div>
-          <span class="mode-label">SECTOR</span>
-        </div>
-
-        <button class="btn-license" id="btn-license-modal">
-          <span class="license-status-dot active" id="license-indicator"></span>
-          <span id="license-label">PRO UNLOCKED</span>
-        </button>
-      </div>
-    </header>
-
-    <!-- SectorForge Card -->
-    <section class="holo-card" id="scan-card">
-      <div class="card-header-bar">
-        <h2>SectorForge Carver</h2>
-        <div style="display: flex; gap: 8px;">
-          <span class="card-pill live" id="badge-trim-status" title="TRIM Status">SSD DEEPSHIELD</span>
-          <span class="card-pill">VAULTGUARD ACTIVE</span>
-        </div>
-      </div>
-      <p class="dim">Forensic Carving Engine: Memory-mapped parallel signature scanning and 1-click byte-exact restoration.</p>
-
-      <div class="scan-controls">
-        <div class="scan-type-selector">
-          <label class="radio-label">
-            <input type="radio" name="scan-type" value="folder" checked />
-            <span>📁 Folder / Directory (Recommended)</span>
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="scan-type" value="file" />
-            <span>📄 File / Disk Image (.dd, .raw, any file)</span>
-          </label>
-          <label class="radio-label">
-            <input type="radio" name="scan-type" value="drive" />
-            <span>💾 Physical Drive (Admin)</span>
-          </label>
-        </div>
-
-        <div id="file-picker-section" class="file-picker-container">
-          <div class="path-input-row" style="display: flex; gap: 8px; width: 100%; margin-bottom: 8px;">
-            <input 
-              type="text" 
-              id="target-path-input" 
-              class="target-path-input" 
-              placeholder="Select folder or paste path (e.g. D:\ZeusV4)..." 
-              spellcheck="false"
-              style="flex: 1; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 8px; padding: 10px 14px; color: #fff; font-family: var(--font-mono); font-size: 13px;"
-            />
-            <button id="btn-browse-folder" class="btn-secondary" type="button" title="Browse and select any folder">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
-              </svg>
-              Browse Folder
-            </button>
-            <button id="btn-browse-file" class="btn-secondary hidden" type="button" title="Browse and select any file or disk image">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                <polyline points="14 2 14 8 20 8"></polyline>
-              </svg>
-              Browse File
-            </button>
-          </div>
-          <span id="selected-file" class="selected-file-label">No folder selected. Click 'Browse Folder' or paste path.</span>
-          <input type="file" id="image-file-input" class="hidden" />
-        </div>
-
-        <div id="drive-warning" class="drive-warning hidden">
-          ⚠ Direct raw physical drive access (\\.\PhysicalDrive0) requires Administrator execution. VaultGuard read-only access is enforced.
-        </div>
-
-        <div id="ssd-shield-bar" class="ssd-shield-bar" style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-prism); display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; background: rgba(0, 242, 254, 0.05); border: 1px solid rgba(0, 242, 254, 0.2); padding: 8px 12px; border-radius: 6px;">
-          <span>⚡ <strong>SSD DeepShield:</strong> VSS Shadow Snapshots & MFT Resident Carving Armed</span>
-          <span style="color: var(--accent-emerald);" id="trim-state-indicator">✓ TRIM MONITORED</span>
-        </div>
-      </div>
-
-      <div class="action-btn-row">
-        <button id="btn-scan" class="btn-primary">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-            <circle cx="12" cy="12" r="10"></circle>
-            <polygon points="10 8 16 12 10 16 10 8"></polygon>
-          </svg>
-          Start Deep Scan
-        </button>
-      </div>
-
-      <div id="recovery-window" class="warn hidden"></div>
-    </section>
-
-    <!-- Recovery Log Card -->
-    <section class="holo-card" id="terminal-card">
-      <div class="card-header-bar">
-        <h2>Recovery Console</h2>
-        <div class="terminal-status">ENGINE READY</div>
-      </div>
-      <pre id="terminal" class="terminal"></pre>
-    </section>
-
-    <!-- Restored Stats Card -->
-    <section class="holo-card" id="stats-card">
-      <h2>Restored Entities</h2>
-      <div id="counter" class="counter">0</div>
-      <div class="counter-sub">Verified entities reconstructed to disk</div>
-    </section>
-
-    <!-- Preview Bay Card -->
-    <section class="holo-card" id="preview-bay-card">
-      <div class="card-header-bar">
-        <h2>Preview Bay</h2>
-        <span class="card-pill live">LIVE EXTRACTION</span>
-      </div>
-      <p class="dim">Recovered files previewable immediately. Click 'Restore' on any item to save to disk.</p>
-      <div id="preview-grid-container"></div>
-    </section>
-
-    <!-- Constellation Card -->
-    <section class="holo-card" id="constellation-card">
-      <div class="card-header-bar">
-        <h2>Session Constellation</h2>
-        <div style="display: flex; gap: 8px; align-items: center;">
-          <button id="btn-ingest-log" class="btn-subtle" title="Import telemetry JSONL">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="17 8 12 3 7 8"></polyline>
-              <line x1="12" y1="3" x2="12" y2="15"></line>
-            </svg>
-            Ingest Log
-          </button>
-          <div class="terminal-status" id="constellation-status">IDLE</div>
-        </div>
-      </div>
-      <div id="constellation-grid" class="constellation">
-        <div class="constellation__empty">
-          <div class="constellation__empty-ring"></div>
-          <span>No telemetry indexed yet</span>
-          <span class="dim">Ingest a JSONL log to build your workspace constellation.</span>
-        </div>
-      </div>
-      <div class="constellation__meta">
-        <div class="meta-chip"><span id="meta-events">0</span> events</div>
-        <div class="meta-chip"><span id="meta-files">0</span> files</div>
-        <div class="meta-chip" id="meta-ts">t-0</div>
-      </div>
-    </section>
-
-    <!-- Time Capsule Card -->
-    <section class="holo-card" id="time-capsule-card">
-      <div class="card-header-bar">
-        <h2>🛡️ Time Capsule Insurance</h2>
-        <div class="terminal-status">DAEMON ACTIVE</div>
-      </div>
-      <p class="dim">Continuous background snapshots. Never lose project files to accidental deletion or corrupted writes.</p>
-      <div id="time-capsule-container"></div>
-    </section>
-  </main>
-
-  <input type="file" id="jsonl-picker" accept=".jsonl,.log,.txt" class="hidden" />
-  <script type="module" src="js/app.js"></script>
-
-  <!-- System Status / Pro License Modal -->
-  <div id="license-modal" class="modal-backdrop hidden">
-    <div class="modal-dialog holo-card">
-      <div class="card-header-bar">
-        <h2>⚡ ClockVerse Pro — System Engine Status</h2>
-        <button class="btn-icon" id="btn-close-license">&times;</button>
-      </div>
-      <p class="dim" style="margin: 10px 0 18px 0;">All advanced forensic recovery, Time Capsule rollback, and carving pipelines are fully activated and unlocked.</p>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px;">
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 10px; padding: 14px;">
-          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-emerald); font-weight: 700; margin-bottom: 4px;">LICENSE TIER</div>
-          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">PRO (UNLOCKED)</div>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Unlimited Carving & Restores</div>
-        </div>
-
-        <div style="background: rgba(0, 242, 254, 0.08); border: 1px solid rgba(0, 242, 254, 0.25); border-radius: 10px; padding: 14px;">
-          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-prism); font-weight: 700; margin-bottom: 4px;">TIME CAPSULE</div>
-          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">ACTIVE (CAS SHA-256)</div>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Zero-Loss Byte Rollback</div>
-        </div>
-
-        <div style="background: rgba(246, 211, 101, 0.08); border: 1px solid rgba(246, 211, 101, 0.25); border-radius: 10px; padding: 14px;">
-          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-solar); font-weight: 700; margin-bottom: 4px;">SECTORFORGE</div>
-          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">MULTI-CORE CARVER</div>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Parallel Memory-Mapped I/O</div>
-        </div>
-
-        <div style="background: rgba(255, 94, 58, 0.08); border: 1px solid rgba(255, 94, 58, 0.25); border-radius: 10px; padding: 14px;">
-          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--accent-plasma); font-weight: 700; margin-bottom: 4px;">VAULTGUARD</div>
-          <div style="font-size: 16px; font-family: var(--font-display); font-weight: 700; color: #fff;">STRICT READ-ONLY</div>
-          <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Zero Write Invariant Enforced</div>
-        </div>
-      </div>
-
-      <button class="btn-secondary" id="btn-close-license-alt" style="width: 100%; justify-content: center;">
-        Close Status
-      </button>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ClockVerse · Recovery Studio</title><link rel="stylesheet" href="workbench.css"></head>
+<body class="easy-mode">
+<div class="app-shell">
+  <header class="topbar">
+    <a class="brand" href="#"><span class="brand-icon">C</span>ClockVerse<span class="studio">RECOVERY STUDIO</span></a>
+    <div class="mode-switch">
+      <button id="mode-easy" class="mode-btn selected" type="button" title="1-Click Easy Wizard">⚡ Easy Mode</button>
+      <button id="mode-pro" class="mode-btn" type="button" title="Pro Forensic Investigation">🔬 Pro Forensic</button>
     </div>
-  </div>
+    <nav>
+      <a href="#results">Recovered files</a>
+      <a href="#snapshots">Snapshots & VSS</a>
+      <span id="admin-badge" class="badge" title="Elevation Status">Checking…</span>
+      <span id="connection" class="connection">Connecting…</span>
+    </nav>
+  </header>
+  <main>
+    <div id="elevation-banner" class="elevation-banner hidden">
+      <div class="elevation-msg">
+        <span>🛡️</span>
+        <div><strong>Standard User Mode:</strong> To scan raw USB/SSD physical drives or create 0 MB VSS snapshots, Windows requires Administrator privileges.</div>
+      </div>
+      <button id="btn-elevate" class="button primary" type="button">⚡ 1-Click Relaunch as Admin</button>
+    </div>
+
+    <div class="page-heading">
+      <div>
+        <span class="eyebrow">YOUR FILES. ANOTHER CHANCE.</span>
+        <h1>Bring your work back.</h1>
+        <p>1-Click direct drive recovery, 0 MB instant VSS snapshots, and SSD shadow mining.</p>
+      </div>
+      <button id="demo" class="button secondary">↗ Try a sample image</button>
+    </div>
+
+    <div class="workspace">
+      <section class="panel source-panel">
+        <div class="section-title"><span class="step">01</span><h2>Choose your source</h2></div>
+        <div class="segmented">
+          <button class="selected" id="mode-drive" type="button">💾 Drive / USB</button>
+          <button id="mode-image" type="button">Disk image</button>
+          <button id="mode-folder" type="button">Folder</button>
+        </div>
+        <p id="source-hint" class="helper">Directly scan USB pen drives, SD cards, or disk partitions without creating image files.</p>
+        
+        <div id="drive-group">
+          <label for="drive-select">Target Storage Device</label>
+          <div class="input-row">
+            <select id="drive-select" aria-label="Target storage device"></select>
+            <button id="refresh-drives" class="button icon" type="button" title="Refresh Drives">↻</button>
+          </div>
+          <div id="drive-pill" class="drive-pill">Detecting connected drives…</div>
+        </div>
+
+        <div id="path-group" class="hidden">
+          <label for="source" id="source-label">Source path</label>
+          <div class="input-row">
+            <input id="source" placeholder="D:\disk-image.img" spellcheck="false">
+            <button id="browse-source" class="button icon" aria-label="Browse source">…</button>
+          </div>
+        </div>
+
+        <label for="destination">Save recovered files to (Must be separate healthy drive)</label>
+        <div class="input-row">
+          <input id="destination" placeholder="Choose a healthy recovery folder" spellcheck="false">
+          <button id="browse-destination" class="button icon" aria-label="Browse recovery destination">…</button>
+        </div>
+        <p class="helper">Anti-Overwrite Protection active: ClockVerse will refuse to save files onto the drive being scanned.</p>
+
+        <div class="source-note">
+          <span>↗</span>
+          <p id="safety-tip">No image file required for USB/Pen Drive scans.<br><small>Avoid writing new data to the target drive to prevent overwriting deleted clusters.</small></p>
+        </div>
+
+        <div class="input-row scan-actions">
+          <button id="quick-scan" class="button primary" type="button">⚡ Quick Scan (15s)</button>
+          <button id="scan" class="button secondary" type="button">Deep Scan <span>→</span></button>
+          <button id="cancel" class="button secondary" disabled type="button">Stop</button>
+        </div>
+        <p id="scan-error" class="error" role="alert"></p>
+      </section>
+
+      <section class="panel observatory" id="observatory" data-state="idle" aria-label="Recovery progress">
+        <div class="observatory-top"><span class="eyebrow">RECOVERY OBSERVATORY</span><span class="live-badge" id="activity-badge">STANDING BY</span></div>
+        <div class="orbit-visual" aria-hidden="true">
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <div class="orbit orbit-three"></div>
+          <div class="orbit-traveller"></div>
+          <div class="orbit-centre">
+            <svg viewBox="0 0 48 48" fill="none">
+              <path d="M14 9h13l8 8v23H14V9Z" stroke="currentColor" stroke-width="1.6"/>
+              <path d="M27 9v9h8M20 26h10M20 31h7" stroke="currentColor" stroke-width="1.6"/>
+              <path d="m7 24-3 4 3 4M4 28h7" stroke="currentColor" stroke-width="1.6"/>
+            </svg>
+          </div>
+          <span class="orbit-tag tag-one">NTFS records</span>
+          <span class="orbit-tag tag-two">File signatures</span>
+          <span class="orbit-tag tag-three">Shadow copies</span>
+        </div>
+        <div class="observatory-copy"><h2 id="phase">Every file has a story.</h2><p id="progress-detail">Let’s see which ones we can bring back.</p></div>
+        <div class="progress-track" role="progressbar" aria-label="Scan progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="progress"><div id="progress-fill"></div></div>
+        <div class="scan-metrics">
+          <div><strong id="metric-found">0</strong><span>files saved</span></div>
+          <div><strong id="metric-read">—</strong><span>data scanned</span></div>
+          <div><strong id="metric-time">—</strong><span>elapsed</span></div>
+        </div>
+        <span class="quiet-label">LOCAL PROCESSING · ZERO CLOUD UPLOADS · READ-ONLY DISK ACCESS</span>
+      </section>
+    </div>
+
+    <section class="panel results-panel" id="results">
+      <div class="results-header">
+        <div><span class="eyebrow">02 / REVIEW YOUR RESULTS</span><h2>Recovered, with context. <span id="result-count" class="count">0</span></h2></div>
+        <button id="open-output" class="button secondary" disabled>Open session folder ↗</button>
+      </div>
+      <div class="category-pills">
+        <button class="cat-pill active" id="cat-all" data-cat="all" type="button">All Files <span id="count-all">0</span></button>
+        <button class="cat-pill" id="cat-images" data-cat="images" type="button">📷 Photos <span id="count-images">0</span></button>
+        <button class="cat-pill" id="cat-docs" data-cat="docs" type="button">📄 Documents <span id="count-docs">0</span></button>
+        <button class="cat-pill" id="cat-media" data-cat="media" type="button">🎬 Audio/Video <span id="count-media">0</span></button>
+        <button class="cat-pill" id="cat-archives" data-cat="archives" type="button">📦 Archives <span id="count-archives">0</span></button>
+      </div>
+      <div class="result-tools">
+        <input type="search" id="filter" placeholder="Search filenames or extensions…" aria-label="Filter recovered files">
+        <select id="origin" aria-label="Filter result source">
+          <option value="">All sources</option>
+          <option value="NTFS">Deleted NTFS files</option>
+          <option value="Signature">Signature candidates</option>
+          <option value="Existing">Existing files</option>
+          <option value="VSS">Shadow Copy restore</option>
+        </select>
+        <span id="result-summary" class="helper">Nothing scanned yet</span>
+      </div>
+      <div id="warnings" class="warnings" role="status"></div>
+      <div id="file-list" class="file-list">
+        <div class="empty-state">
+          <span class="empty-mark">↗</span>
+          <h3>A fresh start for your files.</h3>
+          <p>Your results will appear here, with their source and validation details.</p>
+        </div>
+      </div>
+      <div class="pagination">
+        <button id="prev" class="button secondary" disabled>← Previous</button>
+        <span id="page-info">0 results</span>
+        <button id="next" class="button secondary" disabled>Next →</button>
+      </div>
+    </section>
+
+    <div class="bottom-grid">
+      <section class="panel assistant-panel">
+        <div class="section-title"><span class="assistant-icon">✳</span><div><h2>Missing something?</h2><p class="helper">Local search assistant & SSD shadow miner</p></div><span class="local-pill">OFFLINE</span></div>
+        
+        <div class="shadow-miner-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong>SSD Shift+Delete Recovery (Shadow Miner)</strong>
+            <span class="ssd-pill">PRE-TRIM MINING</span>
+          </div>
+          <p class="helper" style="margin-top:4px;">Shift+Deleted on SSD? TRIM clears raw flash cells, but historical Windows Volume Shadows often hold intact copies.</p>
+          <div class="input-row" style="margin-top:8px;">
+            <input id="miner-query" placeholder="e.g. *.docx, report, or leave empty for all" spellcheck="false">
+            <button id="miner-btn" class="button secondary" type="button">Mine SSD Shadows</button>
+          </div>
+          <div id="miner-results" class="miner-results"></div>
+        </div>
+
+        <div class="chat-log" id="chat-log" role="log" aria-live="polite" style="margin-top:14px;">
+          <div class="chat-message assistant">
+            <strong>Let’s look closer.</strong>
+            <p>Tell me a filename or extension, like <b>invoice.pdf</b> or <b>.jpg</b>. I’ll check the latest scan and saved snapshots. Then we can run a targeted scan.</p>
+          </div>
+        </div>
+        <form id="chat-form" class="chat-form">
+          <input id="chat-query" maxlength="200" placeholder="Which file are you looking for?" aria-label="Missing filename or extension" required>
+          <button id="chat-send" class="button primary" aria-label="Search for missing file">↑</button>
+        </form>
+      </section>
+
+      <section class="panel snapshots-panel" id="snapshots">
+        <div class="vss-card">
+          <div class="vss-title-row">
+            <div>
+              <span class="eyebrow" style="color:var(--mint)">ZERO-BYTE PROTECTION</span>
+              <h3 style="margin-top:2px;">🛡️ Instant 0 MB Volume Snapshot (VSS)</h3>
+            </div>
+            <span class="vss-pill">0 MB EXTRA SPACE</span>
+          </div>
+          <p class="helper">Uses native Windows Volume Shadow Copies. Takes 0 MB disk space immediately and creates a freeze-frame restore point that survives SSD TRIM and Shift+Delete.</p>
+          <div class="input-row" style="margin-top:10px;">
+            <select id="vss-volume" style="max-width:180px;" aria-label="Select Volume"></select>
+            <button id="vss-create" class="button primary" type="button">⚡ Create 0 MB Snapshot</button>
+            <button id="vss-refresh" class="button icon" type="button" title="Refresh Snapshots">↻</button>
+          </div>
+          <div id="vss-list" class="vss-list"></div>
+          <p id="vss-status" class="helper" role="status"></p>
+        </div>
+
+        <hr class="section-divider">
+
+        <div class="section-title">
+          <span class="step">↺</span>
+          <div>
+            <h2>Time Capsule (Compressed CAS Archive)</h2>
+            <p class="helper">Folder backups with Zstandard (ZSTD) compression (60–75% space savings).</p>
+          </div>
+        </div>
+        <div class="snapshot-settings">
+          <label>Capture interval
+            <select id="snapshot-interval">
+              <option value="5">Every 5 minutes</option>
+              <option value="15">Every 15 minutes</option>
+              <option value="30" selected>Every 30 minutes</option>
+              <option value="60">Every hour</option>
+              <option value="1440">Daily</option>
+            </select>
+          </label>
+          <label>Storage budget (GiB)
+            <input id="snapshot-budget" type="number" min="1" max="1048576" value="100">
+          </label>
+        </div>
+        <details class="retention pro-only">
+          <summary>Version retention</summary>
+          <label class="check-label"><input id="snapshot-prune" type="checkbox"> Automatically remove older restore points</label>
+          <label>Versions to keep per folder<input id="snapshot-keep" type="number" min="1" max="1000" value="50"></label>
+          <p class="helper">Off by default. Older restore points are removed after a changed capture; chunks needed by remaining versions are preserved.</p>
+        </details>
+        <div class="input-row">
+          <button id="save-policy" class="button secondary pro-only">Save settings</button>
+          <button id="protect" class="button primary">+ Add folder to archive</button>
+        </div>
+        <div class="input-row pro-only">
+          <button id="backup-location" class="button secondary">Change backup location</button>
+          <button id="backup-open" class="button secondary">Open existing backup</button>
+        </div>
+        <div class="input-row pro-only">
+          <button id="backup-audit" class="button secondary">Verify saved data</button>
+          <button id="backup-cleanup" class="button secondary">Clean unused chunks</button>
+          <button id="backup-stop" class="button secondary" disabled>Stop operation</button>
+        </div>
+        <p id="backup-progress" class="helper" role="status"></p>
+        <p id="storage-info" class="helper"></p>
+        <div id="snapshot-folders"></div>
+        <p id="snapshot-status" class="helper" role="status"></p>
+        <p class="snapshot-footnote pro-only">First capture deduplicates and compresses chunks via Zstandard (zstd). Later captures store only newly altered 4 MiB chunks.</p>
+      </section>
+    </div>
+
+    <details class="panel limits pro-only">
+      <summary>Technical details: File Carving, VSS & Hardware Realities</summary>
+      <p>Direct drive recovery allows read-only sector scanning of USB thumb drives, camera SD cards, and secondary internal partitions (`\\.\D:`). Removable media does not execute TRIM, resulting in an expected 80–95% raw recovery rate when clusters are unoverwritten.</p>
+      <p>On internal NVMe/SATA SSDs where TRIM immediately zeroes deleted flash clusters, raw carving cannot recover permanently deleted files. ClockVerse provides two robust defenses: (1) 0 MB Instant VSS Volume Snapshots created prior to data loss, and (2) SSD Shadow Miner to retrieve pre-TRIM versions from historical Windows Shadow Storage (`Win32_ShadowCopy`).</p>
+    </details>
+    <footer>
+      <span>CLOCKVERSE 2.0 / RECOVERY STUDIO</span>
+      <span>Engineered for real-world storage hardware. Grounded in what’s recoverable.</span>
+    </footer>
+  </main>
+</div>
+
+<dialog id="preview-dialog">
+  <div class="results-header"><h2 id="preview-title"></h2><button class="button secondary" id="preview-close">Close</button></div>
+  <p id="preview-meta" class="helper"></p>
+  <div id="preview-content"></div>
+  <button class="button secondary" id="preview-locate">Locate saved file ↗</button>
+</dialog>
+
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

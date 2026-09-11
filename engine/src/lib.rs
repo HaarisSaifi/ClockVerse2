@@ -8,6 +8,9 @@ pub mod partition;
 pub mod sectorforge;
 pub mod sidecar;
 pub mod timesnap;
+pub mod drives;
+pub mod vss;
+pub mod shadow_miner;
 
 use serde::{Deserialize, Serialize};
 
@@ -88,3 +91,4 @@ pub enum ScanDepth {
     LastWeek,
     DeepForensic,
 }
+pub mod recovery;

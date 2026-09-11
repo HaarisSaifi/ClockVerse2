@@ -18,7 +18,7 @@ export class HoloCore {
       this.renderer = new THREE.WebGLRenderer({
         canvas,
         antialias: false,
-        powerPreference: 'high-performance',
+        powerPreference: 'low-power',
         alpha: true,
       });
       this.scene = new THREE.Scene();
@@ -110,7 +110,7 @@ export class HoloCore {
 
     if (this.renderer) {
       this.renderer.setSize(window.innerWidth, window.innerHeight);
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      this.renderer.setPixelRatio(1);
     }
   }
 
@@ -118,14 +118,15 @@ export class HoloCore {
     if (!this.renderer || !this.scene || !this.camera || !this.points) return;
     const now = performance.now();
     const dt = now - this.#lastFrame;
+    if (dt < 1000 / 30) return;
     this.#lastFrame = now;
 
     // Auto quality tier (blueprint rule): degrade gracefully, never lag
-    if (dt > 16.6 && ++this.#slowFrames >= 30 && this.quality === 1) {
+    if (dt > 50 && ++this.#slowFrames >= 30 && this.quality === 1) {
       this.quality = 0.5;
       this.points.geometry.setDrawRange(0, MAX_PARTICLES / 2);
       this.renderer.setPixelRatio(1);
-    } else if (dt <= 16.6) {
+    } else if (dt <= 50) {
       this.#slowFrames = 0;
     }
 

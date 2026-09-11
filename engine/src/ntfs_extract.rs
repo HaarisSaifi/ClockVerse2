@@ -15,7 +15,7 @@ pub const SPARSE_LCN: i64 = -1;
 #[derive(Debug, Clone, Copy)]
 pub struct ExtractResult {
     pub bytes_recovered: u64,
-    pub missing_clusters: u64, // read errors = overwrite evidence
+    pub missing_clusters: u64, // Read failures do not by themselves establish overwrite.
     pub was_resident: bool,
 }
 
@@ -27,7 +27,12 @@ pub fn extract_file_content(
     record: &MftRecord,
     raw_record: &[u8],
 ) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(record.fixup_ok, "Corrupt MFT fixup");
     let expected_size = record.file_names.first().map(|f| f.real_size).unwrap_or(0);
+    anyhow::ensure!(
+        expected_size <= 64 * 1024 * 1024,
+        "Use streaming extraction for files larger than 64 MiB"
+    );
 
     // Case 1: Resident data — file MFT record ke andar hai, overwrite risk sabse kam
     if record.resident_data_len.is_some() {
@@ -49,7 +54,7 @@ pub fn extract_file_content(
 /// Resident $DATA attribute se bytes nikaalo (record ke andar).
 fn extract_resident_data(raw: &[u8], sector_size: usize) -> Option<Vec<u8>> {
     let mut buf = raw.to_vec();
-    if !apply_fixup(&mut buf, sector_size) {
+    if buf.len() < 24 || !apply_fixup(&mut buf, sector_size) {
         return None; // corrupt record — resident data pe bharosa nahi
     }
     let mut off = u16le(&buf, 20) as usize;
@@ -62,7 +67,7 @@ fn extract_resident_data(raw: &[u8], sector_size: usize) -> Option<Vec<u8>> {
             break;
         }
         let attr_len = u32le(&buf, off + 4) as usize;
-        if attr_len == 0 || off + attr_len > buf.len() {
+        if attr_len < 24 || off + attr_len > buf.len() {
             break;
         }
         let non_resident = buf[off + 8] != 0;
@@ -98,8 +103,11 @@ fn extract_non_resident(
         }
         if run.lcn == SPARSE_LCN {
             // Sparse run — zeros (NTFS standard)
-            let sparse_bytes =
-                (run.length * geo.cluster_size).min(expected_size - out.len() as u64);
+            let sparse_bytes = (run
+                .length
+                .checked_mul(geo.cluster_size)
+                .context("Run length overflow")?)
+            .min(expected_size - out.len() as u64);
             out.extend(std::iter::repeat_n(0u8, sparse_bytes as usize));
             continue;
         }
@@ -108,14 +116,21 @@ fn extract_non_resident(
             .context("LCN overflow")?;
         reader.seek(SeekFrom::Start(offset))?;
 
-        let mut remaining = (run.length * geo.cluster_size).min(expected_size - out.len() as u64);
+        let mut remaining = (run
+            .length
+            .checked_mul(geo.cluster_size)
+            .context("Run length overflow")?)
+        .min(expected_size - out.len() as u64);
         while remaining > 0 {
             let want = (remaining as usize).min(cluster);
-            let _ = reader.read_exact(&mut buf[..want]);
+            reader
+                .read_exact(&mut buf[..want])
+                .context("Incomplete source cluster")?;
             out.extend_from_slice(&buf[..want]);
             remaining -= want as u64;
         }
     }
+    anyhow::ensure!(out.len() as u64 == expected_size, "Incomplete data runs");
     out.truncate(expected_size as usize);
     Ok(out)
 }
@@ -204,6 +219,7 @@ mod tests {
         let offset = 100u64 * geo.cluster_size;
         f.seek(SeekFrom::Start(offset)).unwrap();
         f.write_all(cluster_data).unwrap();
+        f.set_len(offset + geo.cluster_size).unwrap();
         // Sparse region at LCN -1 (hole)
         drop(f);
 

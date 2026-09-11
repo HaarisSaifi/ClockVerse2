@@ -1,103 +1,53 @@
-# ⏳ ClockVerse: Temporal Forensic Reconstruction Engine
+# ClockVerse Recovery Studio
 
-> **$100-Tier Luxury Forensic Data Resurrection Instrument**  
-> Powered by Rust (SectorForge & ChronoScan), Python JSON-RPC Forensic Sidecar, Axum 0.8 License Server, Tauri 2 Shell, and Obsidian Hologram 3D UI.
+A Windows desktop recovery workbench with an offline missing-file assistant and optional version snapshots. This is a development build with verified synthetic recovery cases, not a universal recovery guarantee.
 
----
+## Use
 
-## 🏛 Architecture Overview
+1. Run `cargo run -p clockverse` or build with `cargo build -p clockverse` and launch `target/debug/clockverse.exe`.
+2. Select a stable disk/volume image and an existing recovery destination, preferably on a separate healthy disk.
+3. Start recovery. Review source/integrity labels, preview supported files, and locate the saved session folder. `recovery-report.json` records results and limitations.
+4. If something is missing, type a filename or extension in the assistant. It searches the latest scan and registered snapshots, and can run a targeted image scan.
+5. For future versions, add a snapshot folder and choose capture interval/storage budget. Snapshots only run while the app is open. Exports go to a new folder rather than overwriting current work.
 
-```
-ClockVerse2_anti/
-├── Cargo.toml                     # Cargo workspace configuration
-├── package.json                   # UI development and testing scripts
-├── README.md                      # Architecture & run guide
-├── engine/                        # High-throughput Rust Engine (clockverse-engine)
-│   ├── Cargo.toml
-│   └── src/
-│       ├── lib.rs                 # IPC protocol & event types
-│       ├── sectorforge.rs         # Rayon + memmap2 + Aho-Corasick carver
-│       ├── chrono.rs              # ChronoScan delta stitcher & log replayer
-│       └── sidecar.rs             # Python JSON-RPC stdio bridge
-├── sidecar/                       # Forensic Python Sidecar
-│   ├── sidecar.py                 # JSON-RPC server (image_info, verify_file, carve_thumbnail)
-│   └── test_sidecar.py            # Automated test suite for sidecar protocol
-├── server/                        # Axum 0.8 License Server (clockverse-license)
-│   ├── Cargo.toml
-│   └── src/
-│       └── main.rs                # Razorpay webhook, HMAC-SHA256 & Ed25519 key generation
-├── src-tauri/                     # Tauri 2 Desktop Shell
-│   ├── Cargo.toml
-│   ├── tauri.conf.json            # Desktop window specs & CSP
-│   └── src/
-│       └── main.rs                # Tauri invoke commands emitting engine events
-└── ui/                            # Obsidian Hologram Luxury UI
-    ├── index.html                 # Main interface deck & canvas
-    ├── tokens.css                 # Obsidian Hologram design tokens
-    ├── holo.css                   # Card system with @property --angle
-    ├── vendor/
-    │   └── three.module.js        # Vendored Three.js r185 (100% offline CSP)
-    └── js/
-        ├── app.js                 # Event wiring & UI bootstrap
-        ├── event-stream.js        # SSE/Tauri event bridge with dev mock fallback
-        ├── mode-controller.js     # Dual-mode finite state machine (Chrono <-> Sector)
-        └── holo-core.js           # 200k particle GPU data crystal
-```
+The sample-image button creates a synthetic image containing a valid PNG and PDF; it is a demonstration, not a measurement of real-world recovery accuracy.
 
----
+## What is supported
 
-## ⚡ Key Subsystems
+- Stable raw image files: read in 4 MiB blocks with cancellation, partial-result reporting and output limits.
+- NTFS deleted records: resident data and ordinary fragmented/sparse unnamed data runs, with partition-relative offsets, fixup checks and strict read lengths. No prior snapshot or deletion-date cutoff is required.
+- JPEG, PNG, PDF, ZIP and MP4 signature candidates. Validation depth varies by format and is shown per result. PNG chunk CRCs are checked; a recorded output hash does not prove original-file identity.
+- Existing-folder copying, clearly separated from deleted-file recovery. A different destination volume is required for folder mode.
+- Offline assistant: filename/extension search, simple filename extraction from conversational requests, snapshot lookup/export and targeted scans. It does not call an external AI service or search cloud accounts.
+- Lightweight CSS/SVG progress visual. No Three.js/WebGL import, external font download or continuous idle animation in the active interface. Reduced-motion and hidden-window preferences stop motion.
+- Snapshots: streamed hashing, deduplicated object writes, atomic publication, restore verification, unchanged-version reuse, pause/resume, configurable interval and storage budget. Older restore-point pruning is opt-in; shared object cleanup is not automatic.
 
-### 1. SectorForge Engine (`engine/src/sectorforge.rs`)
-- Multi-threaded signature carver scanning disk images memory-mapped (`memmap2`) in 64MB chunks via `rayon`.
-- Single-pass multi-pattern matching with `aho-corasick` for JPEG, PNG, PDF, ZIP, GZIP, and MP4.
-- Forensic Invariant: Strictly read-only image access (`VaultGuard`).
+## Architecture
 
-### 2. ChronoScan Stitcher (`engine/src/chrono.rs`)
-- Temporal Differential Stitcher replaying genesis and mutation delta events.
-- Reconstructs files forward in time up to a specified temporal cutoff (Today, 2-3 Days Ago, Last Week, Deep Forensic).
+- `engine/src/recovery.rs`: active recovery pipeline and synthetic regression tests.
+- `engine/src/ntfs.rs`, `ntfs_extract.rs`: NTFS parsing and extraction primitives.
+- `engine/src/timesnap.rs`: snapshot store, policies and integrity checks.
+- `src-tauri/src/workbench.rs`: recovery, preview, assistant and snapshot IPC.
+- `ui/index.html`, `ui/workbench.css`, `ui/js/app.js`: active Recovery Studio interface.
+- Existing forensic/index/sidecar modules remain for development. The optional Python sidecar only starts when `CLOCKVERSE_ENABLE_SIDECAR=1`; active recovery does not depend on it.
 
-### 3. Forensic Sidecar (`sidecar/sidecar.py`)
-- Python process communicating with Rust over JSON-RPC (newline-delimited JSON over stdio).
-- Handles file verification (1MB-chunked SHA-256 integrity hashing), image stats, and thumbnail extraction.
+## Verification
 
-### 4. License Server (`server/src/main.rs`)
-- Axum 0.8 service verifying Razorpay webhooks with constant-time HMAC-SHA256 (`ct_eq`).
-- Generates machine-bound, cryptographically signed license keys using Ed25519 (`clockverse|pro|{order_id}|...|sig={hex}`).
-
-### 5. Obsidian Hologram UI (`ui/`)
-- GPU-instanced 200,000 particle golden-spiral data crystal in WebGL (custom GLSL shaders).
-- Dual-Mode Finite State Machine (`IDLE` -> `TRANSITIONING` -> `SWAPPED` -> `IDLE`) crossfading between Quantum Chrono (cyan) and Plasma Sector (amber).
-- Holographic card system featuring `@property --angle` rotating conic-gradient borders.
-- Auto-quality tiering (detects slow frames and halves draw range smoothly without lag).
-- Zero idle GPU burn (pauses animation loop on `visibilitychange`).
-
----
-
-## 🚀 Quickstart & Verification
-
-### 1. Run Sidecar Tests
-```bash
+```powershell
+cargo test -p clockverse-engine -p clockverse
 python sidecar/test_sidecar.py
+Get-Content ui/js/app.js | node --input-type=module --check
+cargo build -p clockverse
 ```
 
-### 2. Run Rust Engine Tests
-```bash
-cargo test -p clockverse-engine
-```
+`npm run dev` serves a browser UI preview. File operations require the desktop app; the preview never fabricates recovery results.
 
-### 3. Run License Server Tests
-```bash
-cargo test -p clockverse-license
-```
+See [PRODUCTION_READINESS.md](PRODUCTION_READINESS.md) for limitations, validation evidence and remaining release gates.
 
-### 4. Run Frontend in Browser Dev Mode
-```bash
-npx serve ui -l 5173
-```
-Open `http://localhost:5173` in your browser.
+## Large-folder snapshots, without payments
 
-### 5. Run Tauri Desktop App
-```bash
-cargo tauri dev
-```
+New repositories default to a configurable 100 GiB budget. There is no 1/10/50 GiB folder cap: eligible files are streamed in 4 MiB chunks, subject to quota and available storage. Budget applies to unique stored chunks across all versions, not the source-folder size. The first capture can require approximately the full source size; later captures write only new chunks but still read all eligible files. Hash references and file lists consume memory proportional to file/chunk count.
+
+Use **Change backup location** to copy and verify the repository onto a chosen drive; the previous copy stays intact. **Verify saved data** checks chunks, **Clean unused chunks** reclaims unreferenced content, and **Stop operation** cancels foreground backup work. **Open existing backup** reconnects an existing repository after a drive move. Repository locations persist across restarts.
+
+Desktop recovery and snapshots work without payment or license activation. The old server source is optional and excluded from default workspace builds. See [release limitations](PRODUCTION_READINESS.md) and [snapshot design and sources](docs/SNAPSHOT_DESIGN.md).

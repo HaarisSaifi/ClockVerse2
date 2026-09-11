@@ -1,7 +1,13 @@
 [workspace]
 resolver = "2"
+default-members = ["engine", "src-tauri"]
 members = [
     "engine",
     "server",
     "src-tauri",
 ]
+
+[profile.release]
+opt-level = 2
+codegen-units = 8
+lto = false

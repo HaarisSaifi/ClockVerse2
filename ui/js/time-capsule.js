@@ -52,7 +52,7 @@ export class TimeCapsuleUI {
     try {
       await invoke('time_capsule_protect', { path, name });
       await this.refresh();
-      this.showToast(`✓ "${name}" is now continuously protected`);
+      this.showToast(`✓ "${name}" has a baseline snapshot; automatic snapshots run every 10 minutes`);
     } catch (e) {
       this.showToast(`Protection failed: ${e}`, true);
     }
@@ -82,13 +82,13 @@ export class TimeCapsuleUI {
   }
 
   async rollback(folderPath, snapshotId) {
-    if (!confirm('Are you sure you want to roll back this folder to this snapshot? All deleted or modified files will be resurrected.')) {
+    if (!confirm('Are you sure you want to roll back this folder to this snapshot? Captured files will replace matching destination files. Other files are preserved.')) {
       return;
     }
 
     try {
       const restored = await invoke('time_capsule_rollback', { folderPath, snapshotId });
-      this.showToast(`✓ Rollback complete! ${restored} files restored with 100% byte fidelity.`);
+      this.showToast(`✓ Rollback complete! ${restored} files restored and SHA-256 verified.`);
       await this.refresh();
     } catch (e) {
       this.showToast(`Rollback failed: ${e}`, true);
@@ -103,7 +103,7 @@ export class TimeCapsuleUI {
         <div class="capsule-empty">
           <div class="capsule-icon">🛡️</div>
           <h3>No Protected Folders Registered</h3>
-          <p>Protect any project folder or pendrive. Continuous SHA-256 snapshots ensure you never lose work.</p>
+          <p>Protect any project folder or pendrive. Scheduled snapshots preserve captured versions. Keep backup storage on a separate healthy drive.</p>
           <button class="btn-primary" id="btn-capsule-protect-init">
             + Protect Folder
           </button>
@@ -117,7 +117,7 @@ export class TimeCapsuleUI {
     this.container.innerHTML = `
       <div class="capsule-grid">
         ${this.folders.map((f) => {
-          const statusClass = typeof f.status === 'string' ? f.status.toLowerCase() : 'active';
+          const statusClass = typeof f.status === 'string' ? f.status.toLowerCase() : 'error';
           const sizeMb = ((f.total_bytes || 0) / 1024 / 1024).toFixed(1);
           const lastTime = f.last_snapshot ? new Date(f.last_snapshot / 1000).toLocaleTimeString() : 'Never';
           const isHistoryActive = this.historyFolder === f.path;
@@ -127,6 +127,7 @@ export class TimeCapsuleUI {
               <div class="capsule-header">
                 <span class="capsule-status ${statusClass}"></span>
                 <h4>${escapeHtml(f.name)}</h4>
+                  ${f.status?.Error ? `<span role="status">${escapeHtml(f.status.Error)}</span>` : ''}
               </div>
               <div class="capsule-path" title="${escapeHtml(f.path)}">${escapeHtml(f.path)}</div>
               <div class="capsule-stats">

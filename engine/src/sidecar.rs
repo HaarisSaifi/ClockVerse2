@@ -100,21 +100,39 @@ impl Sidecar {
 
     // Convenience wrappers (existing methods, now using fixed call())
     pub async fn list_partitions(&mut self, image_path: &str) -> anyhow::Result<Value> {
-        self.call("tsk_list_partitions", json!({"image_path": image_path})).await
+        self.call("tsk_list_partitions", json!({"image_path": image_path}))
+            .await
     }
 
-    pub async fn list_deleted_files(&mut self, image_path: &str, offset: u64) -> anyhow::Result<Value> {
-        self.call("tsk_list_files", json!({
-            "image_path": image_path,
-            "partition_offset": offset
-        })).await
+    pub async fn list_deleted_files(
+        &mut self,
+        image_path: &str,
+        offset: u64,
+    ) -> anyhow::Result<Value> {
+        self.call(
+            "tsk_list_files",
+            json!({
+                "image_path": image_path,
+                "partition_offset": offset
+            }),
+        )
+        .await
     }
 
-    pub async fn carve_thumbnail(&mut self, image_path: &str, offset: u64, out_path: &str) -> anyhow::Result<Value> {
-        self.call("carve_thumbnail", json!({
-            "carve_offset": offset,
-            "image_path": image_path,
-            "out_path": out_path
-        })).await
+    pub async fn carve_thumbnail(
+        &mut self,
+        image_path: &str,
+        offset: u64,
+        out_path: &str,
+    ) -> anyhow::Result<Value> {
+        self.call(
+            "carve_thumbnail",
+            json!({
+                "carve_offset": offset,
+                "image_path": image_path,
+                "out_path": out_path
+            }),
+        )
+        .await
     }
 }

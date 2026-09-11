@@ -29,7 +29,8 @@ pub fn generate_signing_key() -> SigningKey {
 
 #[tokio::main]
 async fn main() {
-    let secret = std::env::var("RZP_WEBHOOK_SECRET").unwrap_or_else(|_| "test_webhook_secret".into());
+    let secret =
+        std::env::var("RZP_WEBHOOK_SECRET").unwrap_or_else(|_| "test_webhook_secret".into());
     let state = Arc::new(AppState {
         webhook_secret: secret,
         license_signing_key: generate_signing_key(),
@@ -39,7 +40,9 @@ async fn main() {
     let port = std::env::var("PORT").unwrap_or_else(|_| "8787".into());
     let addr = format!("0.0.0.0:{port}");
     println!("[clockverse-license] server binding on http://{addr}");
-    let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind failed");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .expect("bind failed");
     axum::serve(listener, app).await.expect("server error");
 }
 

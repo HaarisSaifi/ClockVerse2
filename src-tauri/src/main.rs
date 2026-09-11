@@ -1,14 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod workbench;
 use clockverse_engine::index::EventIndex;
-use clockverse_engine::timesnap::{CapsuleStatus, ProtectedFolder, TimeCapsule};
 use clockverse_engine::sidecar::Sidecar;
-use clockverse_engine::{
-    chrono::StreamStitch, ntfs, ntfs_extract, partition, sectorforge, EngineEvent,
-};
-use serde::{Deserialize, Serialize};
-use reqwest::Client;
+use clockverse_engine::timesnap::{CapsuleStatus, ProtectedFolder, TimeCapsule};
+use clockverse_engine::{chrono::StreamStitch, EngineEvent};
+use serde::Serialize;
 use serde_json::json;
+use workbench::*;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -24,224 +23,34 @@ type SharedSidecar = Arc<TokioMutex<Option<Sidecar>>>;
 struct AppState {
     index: Arc<StdMutex<EventIndex>>,
     time_capsule: Arc<StdMutex<TimeCapsule>>,
+    snapshot_config: std::path::PathBuf,
 }
 
-#[tauri::command]
-async fn start_scan(
-    app: AppHandle,
-    target: String,
-) -> Result<Vec<clockverse_engine::sectorforge::CarvedFileInfo>, String> {
-    let clean_target = target.trim().trim_matches('"').to_string();
-    if clean_target.is_empty() {
-        return Err("Target path cannot be empty. Please select a folder or file to scan.".to_string());
-    }
-
-    let _ = app.emit(
-        "engine",
-        EngineEvent::ScanStarted {
-            target: clean_target.clone(),
-            total_sectors: 0,
-        },
-    );
-
-    let path_obj = std::path::PathBuf::from(&clean_target);
-    let staging_dir = std::env::temp_dir().join("clockverse_staging");
-
-    // Case 1: Folder / Directory Scan (Direct Carving + VSS Shadow Copy Extraction)
-    if path_obj.is_dir() {
-        let dir_str = clean_target.clone();
-        let staging_clone = staging_dir.clone();
-        let mut extracted = tauri::async_runtime::spawn_blocking(move || {
-            sectorforge::carve_folder(&dir_str, &staging_clone)
-        })
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-
-        // Query Windows Volume Shadow Copies for untrimmed previous versions
-        let dir_str2 = clean_target.clone();
-        if let Ok(vss_files) = vss_scan_folder(dir_str2).await {
-            extracted.extend(vss_files);
-        }
-
-        for (i, file) in extracted.iter().enumerate() {
-            let _ = app.emit(
-                "engine",
-                EngineEvent::SectorResult {
-                    particle_index: (i % 1200) as u32,
-                    state_code: 1, // carved
-                    cluster: (file.offset / 4096) as u64,
-                    signature: file.extension.clone(),
-                    confidence: file.confidence,
-                },
-            );
-            let _ = app.emit(
-                "engine",
-                EngineEvent::FileRestored {
-                    path: file.path.clone(),
-                    bytes: file.size_bytes,
-                },
-            );
-        }
-
-        let verified_count = extracted.len() as u32;
-        let _ = app.emit(
-            "engine",
-            EngineEvent::ScanComplete {
-                found: verified_count,
-                verified: verified_count,
-                failures: 0,
-            },
-        );
-
-        return Ok(extracted);
-    }
-
-    // Case 2: File / Disk Image / Raw Drive
-    let target_clone = clean_target.clone();
-    let target_for_err = clean_target.clone();
-    let hits = tauri::async_runtime::spawn_blocking(move || {
-        sectorforge::carve_image(&target_clone, 64 * 1024 * 1024)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| {
-        let err_str = e.to_string();
-        if target_for_err.contains("PhysicalDrive") && (err_str.contains("Access is denied") || err_str.contains("os error 5")) {
-            "Administrator privileges required to read direct physical drives (\\\\.\\PhysicalDrive0). Right-click ClockVerse and choose 'Run as administrator', or scan a disk image / use Instant Demo Platter.".to_string()
-        } else {
-            err_str
-        }
-    })?;
-
-    for (i, hit) in hits.iter().enumerate() {
-        let _ = app.emit(
-            "engine",
-            EngineEvent::SectorResult {
-                particle_index: (i % 1200) as u32,
-                state_code: 1, // carved
-                cluster: hit.offset / 4096,
-                signature: hit.signature.clone(),
-                confidence: hit.confidence,
-            },
-        );
-    }
-
-    // Extract files into staging directory
-    let staging_dir = std::env::temp_dir().join("clockverse_staging");
-    let target_clone2 = target.clone();
-    let hits_clone = hits.clone();
-    let extracted = tauri::async_runtime::spawn_blocking(move || {
-        sectorforge::extract_carved_files(&target_clone2, &hits_clone, &staging_dir)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
-
-    for file in &extracted {
-        let _ = app.emit(
-            "engine",
-            EngineEvent::FileRestored {
-                path: file.path.clone(),
-                bytes: file.size_bytes,
-            },
-        );
-    }
-
-    let verified_count = extracted.len() as u32;
-    let _ = app.emit(
-        "engine",
-        EngineEvent::ScanComplete {
-            found: hits.len() as u32,
-            verified: verified_count,
-            failures: (hits.len() as u32).saturating_sub(verified_count),
-        },
-    );
-
-    Ok(extracted)
-}
-
-/// Creates a simulated disk platter image containing real sample JPEG, PNG, and PDF files
 #[tauri::command]
 async fn create_demo_platter() -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        let path = std::env::temp_dir().join("clockverse_demo_platter.img");
-        let mut file = std::fs::File::create(&path).map_err(|e| e.to_string())?;
         use std::io::Write;
-
-        let mut platter = vec![0u8; 1024 * 1024]; // 1MB simulated disk platter
-
-        // 1. Valid 1x1 JPEG image at offset 16384 (16 KB)
-        let jpeg_data = [
-            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48,
-            0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08,
-            0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
-            0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20, 0x24, 0x2E, 0x27, 0x20,
-            0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29, 0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27,
-            0x39, 0x3D, 0x38, 0x32, 0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
-            0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00, 0x01, 0x05, 0x01, 0x01,
-            0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
-            0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F,
-            0x00, 0xBF, 0x00, 0xFF, 0xD9
-        ];
-        platter[16384..16384 + jpeg_data.len()].copy_from_slice(&jpeg_data);
-
-        // 2. Valid 1x1 PNG image at offset 65536 (64 KB)
-        let png_data = [
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-            0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-            0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
-            0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
-            0x42, 0x60, 0x82
-        ];
-        platter[65536..65536 + png_data.len()].copy_from_slice(&png_data);
-
-        // 3. Valid PDF document at offset 131072 (128 KB)
-        let pdf_str = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n";
-        let pdf_bytes = pdf_str.as_bytes();
-        platter[131072..131072 + pdf_bytes.len()].copy_from_slice(pdf_bytes);
-
+        let path =
+            std::env::temp_dir().join(format!("clockverse_demo_{}.img", uuid::Uuid::new_v4()));
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| e.to_string())?;
+        let mut platter = vec![0u8; 1024 * 1024];
+        let png = include_bytes!("../assets/sample.png");
+        let pdf = include_bytes!("../assets/sample.pdf");
+        platter[65536..65536 + png.len()].copy_from_slice(png);
+        platter[131072..131072 + pdf.len()].copy_from_slice(pdf);
         file.write_all(&platter).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
         Ok(path.to_string_lossy().to_string())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Restores a recovered file to the user's Downloads or target directory
-#[tauri::command]
-async fn restore_file_to_disk(
-    source_path: String,
-    destination_dir: Option<String>,
-) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let src = std::path::Path::new(&source_path);
-        if !src.exists() {
-            return Err(format!("Source file does not exist: {}", source_path));
-        }
-
-        let file_name = src.file_name().ok_or("invalid file name")?;
-
-        let target_dir = if let Some(dir) = destination_dir {
-            std::path::PathBuf::from(dir)
-        } else {
-            let base = dirs::download_dir()
-                .or_else(dirs::desktop_dir)
-                .unwrap_or_else(|| std::env::temp_dir());
-            base.join("ClockVerse_Restored")
-        };
-
-        std::fs::create_dir_all(&target_dir).map_err(|e| e.to_string())?;
-        let dest = target_dir.join(file_name);
-        std::fs::copy(&src, &dest).map_err(|e| e.to_string())?;
-
-        Ok(dest.to_string_lossy().to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Ingest a JSONL telemetry log, index it, and stream one event per row to the UI.
+/// Import a telemetry log into the optional session index.
 #[tauri::command]
 async fn chrono_ingest(
     app: AppHandle,
@@ -336,323 +145,7 @@ async fn chrono_time_travel(
     Ok(serde_json::json!({ "as_of_micros": as_of_micros, "files": files }))
 }
 
-/// Real TRIM detection & health check via Windows fsutil
-#[tauri::command]
-async fn trim_health_check(target: String) -> Result<serde_json::Value, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            let output = std::process::Command::new("fsutil")
-                .args(["behavior", "query", "disabledeletenotify"])
-                .creation_flags(0x08000000)
-                .output();
-
-            let (ntfs_trim_enabled, raw_out) = match output {
-                Ok(out) => {
-                    let text = String::from_utf8_lossy(&out.stdout).to_string();
-                    let enabled = text.contains("NTFS DisableDeleteNotify = 0");
-                    (enabled, text)
-                }
-                Err(e) => (false, e.to_string()),
-            };
-
-            let drive_letter = target.chars().next().unwrap_or('C').to_ascii_uppercase();
-
-            Ok(serde_json::json!({
-                "trim_active": ntfs_trim_enabled,
-                "drive": format!("{}:", drive_letter),
-                "status": if ntfs_trim_enabled { "TRIM_ACTIVE" } else { "TRIM_INACTIVE" },
-                "summary": if ntfs_trim_enabled {
-                    "⚡ SSD TRIM is ACTIVE: Deleted blocks are queued for zeroing. ClockVerse VSS & MFT engines engaged."
-                } else {
-                    "✓ TRIM is inactive/paused: Sectors remain intact until overwritten."
-                },
-                "raw": raw_out.trim()
-            }))
-        }
-        #[cfg(not(windows))]
-        {
-            Ok(serde_json::json!({ "trim_active": false, "status": "UNKNOWN" }))
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Queries Windows Volume Shadow Copies for any untrimmed deleted previous versions of a folder
-#[tauri::command]
-async fn vss_scan_folder(
-    folder_path: String,
-) -> Result<Vec<clockverse_engine::sectorforge::CarvedFileInfo>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let clean = folder_path.trim().trim_matches('"').to_string();
-        if clean.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            let drive_letter = clean.chars().next().unwrap_or('C').to_ascii_uppercase();
-            let staging = std::env::temp_dir().join("clockverse_staging").join("vss");
-            std::fs::create_dir_all(&staging).ok();
-
-            let rel_path = if clean.len() > 3 {
-                clean[3..].trim_start_matches('\\')
-            } else {
-                ""
-            };
-
-            let script = format!(
-                r#"
-                $drive = "{}:"
-                $rel = "{}"
-                $staging = "{}"
-                $extracted = @()
-
-                try {{
-                    $vssOut = vssadmin list shadows /for=$drive 2>$null
-                    if ($LASTEXITCODE -eq 0 -and $vssOut) {{
-                        $shadowVolumes = @()
-                        foreach ($line in ($vssOut -split "`r?`n")) {{
-                            if ($line -match "Shadow Copy Volume: (\\\\\?\\GLOBALROOT\\Device\\HarddiskVolumeShadowCopy\d+)") {{
-                                $shadowVolumes += $matches[1]
-                            }}
-                        }}
-
-                        foreach ($sh in $shadowVolumes | Select-Object -Last 2) {{
-                            $sourceDir = Join-Path $sh $rel
-                            if (Test-Path -LiteralPath $sourceDir) {{
-                                $items = Get-ChildItem -LiteralPath $sourceDir -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 30
-                                foreach ($it in $items) {{
-                                    $destName = "vss_" + $it.Name
-                                    $destPath = Join-Path $staging $destName
-                                    Copy-Item -LiteralPath $it.FullName -Destination $destPath -Force -ErrorAction SilentlyContinue
-                                    if (Test-Path -LiteralPath $destPath) {{
-                                        $extracted += [PSCustomObject]@{{
-                                            name = "[VSS] " + $it.Name
-                                            path = $destPath
-                                            size = $it.Length
-                                            ext = $it.Extension.TrimStart('.').ToLower()
-                                        }}
-                                    }}
-                                }}
-                            }}
-                        }}
-                    }}
-                }} catch {{}}
-
-                if ($extracted.Count -gt 0) {{
-                    $extracted | ConvertTo-Json -Compress
-                }} else {{
-                    Write-Output "[]"
-                }}
-                "#,
-                drive_letter,
-                rel_path.replace('\\', "\\\\"),
-                staging.to_string_lossy().replace('\\', "\\\\")
-            );
-
-            let output = std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", &script])
-                .creation_flags(0x08000000)
-                .output();
-
-            let mut results = Vec::new();
-            if let Ok(out) = output {
-                let json_text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json_text) {
-                    if let Some(arr) = val.as_array() {
-                        for (i, item) in arr.iter().enumerate() {
-                            let name = item["name"].as_str().unwrap_or("vss_file").to_string();
-                            let path = item["path"].as_str().unwrap_or("").to_string();
-                            let size = item["size"].as_u64().unwrap_or(0);
-                            let ext = item["ext"].as_str().unwrap_or("bin").to_string();
-                            results.push(clockverse_engine::sectorforge::CarvedFileInfo {
-                                id: format!("vss_{}", i),
-                                name,
-                                path,
-                                size_bytes: size,
-                                extension: ext,
-                                confidence: 1.0,
-                                offset: 0,
-                            });
-                        }
-                    } else if val.is_object() {
-                        let name = val["name"].as_str().unwrap_or("vss_file").to_string();
-                        let path = val["path"].as_str().unwrap_or("").to_string();
-                        let size = val["size"].as_u64().unwrap_or(0);
-                        let ext = val["ext"].as_str().unwrap_or("bin").to_string();
-                        results.push(clockverse_engine::sectorforge::CarvedFileInfo {
-                            id: "vss_0".to_string(),
-                            name,
-                            path,
-                            size_bytes: size,
-                            extension: ext,
-                            confidence: 1.0,
-                            offset: 0,
-                        });
-                    }
-                }
-            }
-
-            Ok(results)
-        }
-        #[cfg(not(windows))]
-        {
-            Ok(Vec::new())
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-#[derive(Serialize)]
-struct DeletedFileInfo {
-    record_number: u64,
-    name: String,
-    size_bytes: u64,
-    is_resident: bool,
-    fixup_ok: bool,
-    modified_utc: String, // ISO-ish for UI
-}
-
-/// Scan a disk image for deleted files via $MFT.
-/// Results stream as EngineEvent::SectorResult (state_code=1, carved).
-#[tauri::command]
-async fn scan_deleted_files(
-    app: AppHandle,
-    image_path: String,
-) -> Result<Vec<DeletedFileInfo>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let img = std::fs::File::open(&image_path).map_err(|e| format!("open: {e}"))?;
-
-        // Partition table se NTFS volume dhoondo
-        let mut s0 = [0u8; 512];
-        let mut s1 = [0u8; 512];
-        use std::io::{Read, Seek, SeekFrom};
-        let mut f = std::fs::File::open(&image_path).map_err(|e| e.to_string())?;
-        f.read_exact(&mut s0).map_err(|e| e.to_string())?;
-        f.seek(SeekFrom::Start(512)).map_err(|e| e.to_string())?;
-        f.read_exact(&mut s1).map_err(|e| e.to_string())?;
-        // GPT entries: typically 128 entries * 128 bytes = 16KB at LBA 2
-        f.seek(SeekFrom::Start(2 * 512))
-            .map_err(|e| e.to_string())?;
-        let mut gpt_entries = vec![0u8; 128 * 128];
-        let _ = f.read_exact(&mut gpt_entries);
-
-        let part =
-            partition::find_ntfs_volume(&s0, &s1, &gpt_entries).ok_or("no NTFS partition found")?;
-        let vol_offset = part.first_lba * 512;
-
-        // Boot sector padho
-        let mut bs = vec![0u8; 512];
-        f.seek(SeekFrom::Start(vol_offset))
-            .map_err(|e| e.to_string())?;
-        f.read_exact(&mut bs).map_err(|e| e.to_string())?;
-        let geo = ntfs::parse_boot_sector(&bs).ok_or("invalid NTFS boot sector")?;
-
-        // $MFT scan
-        let mut deleted = Vec::new();
-        let app2 = app.clone();
-        let _ = ntfs::scan_mft(&img, &geo, 1_000_000, |rec| {
-            if rec.in_use || rec.is_directory {
-                return;
-            }
-            if let Some(fna) = rec.file_names.first() {
-                let info = DeletedFileInfo {
-                    record_number: rec.record_number,
-                    name: fna.name.clone(),
-                    size_bytes: fna.real_size,
-                    is_resident: rec.resident_data_len.is_some(),
-                    fixup_ok: rec.fixup_ok,
-                    modified_utc: format!("{}µs", fna.modified_unix_us),
-                };
-                // Stream to crystal: deleted = carved (amber)
-                let _ = app2.emit(
-                    "engine",
-                    EngineEvent::SectorResult {
-                        particle_index: rec.record_number as u32,
-                        state_code: 1,
-                        cluster: rec.record_number * geo.record_size as u64 / geo.cluster_size,
-                        signature: "MFT-DELETED".into(),
-                        confidence: if rec.fixup_ok { 0.85 } else { 0.40 },
-                    },
-                );
-                deleted.push(info);
-            }
-        })
-        .map_err(|e| e.to_string())?;
-
-        let _ = app.emit(
-            "engine",
-            EngineEvent::ScanComplete {
-                found: deleted.len() as u32,
-                verified: 0,
-                failures: 0,
-            },
-        );
-        Ok(deleted)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Extract one deleted file's content by MFT record number.
-#[tauri::command]
-async fn extract_deleted_file(
-    image_path: String,
-    record_number: u64,
-    output_path: String,
-) -> Result<u64, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let img = std::fs::File::open(&image_path).map_err(|e| e.to_string())?;
-
-        // Partition + geometry (same as scan)
-        let mut f = std::fs::File::open(&image_path).map_err(|e| e.to_string())?;
-        let mut s0 = [0u8; 512];
-        let mut s1 = [0u8; 512];
-        use std::io::{Read, Seek, SeekFrom};
-        f.read_exact(&mut s0).map_err(|e| e.to_string())?;
-        f.seek(SeekFrom::Start(512)).map_err(|e| e.to_string())?;
-        f.read_exact(&mut s1).map_err(|e| e.to_string())?;
-        f.seek(SeekFrom::Start(2 * 512))
-            .map_err(|e| e.to_string())?;
-        let mut gpt_entries = vec![0u8; 128 * 128];
-        let _ = f.read_exact(&mut gpt_entries);
-
-        let part =
-            partition::find_ntfs_volume(&s0, &s1, &gpt_entries).ok_or("no NTFS partition")?;
-        let vol_offset = part.first_lba * 512;
-        let mut bs = vec![0u8; 512];
-        f.seek(SeekFrom::Start(vol_offset))
-            .map_err(|e| e.to_string())?;
-        f.read_exact(&mut bs).map_err(|e| e.to_string())?;
-        let geo = ntfs::parse_boot_sector(&bs).ok_or("invalid NTFS")?;
-
-        // Record padho
-        let rec_offset =
-            vol_offset + geo.mft_lcn * geo.cluster_size + record_number * geo.record_size as u64;
-        let mut raw = vec![0u8; geo.record_size];
-        f.seek(SeekFrom::Start(rec_offset))
-            .map_err(|e| e.to_string())?;
-        f.read_exact(&mut raw).map_err(|e| e.to_string())?;
-
-        let rec = ntfs::parse_record(&raw, record_number, geo.sector_size)
-            .ok_or("record parse failed")?;
-        let data = ntfs_extract::extract_file_content(&img, &geo, &rec, &raw)
-            .map_err(|e| e.to_string())?;
-
-        // VaultGuard: staging dir mein likho (final destination baad mein)
-        std::fs::write(&output_path, &data).map_err(|e| e.to_string())?;
-        Ok(data.len() as u64)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// List partitions via the pytsk3 sidecar (EWF/raw image support).
+/// Read partition metadata through the optional forensic sidecar.
 #[tauri::command]
 async fn sidecar_list_partitions(
     sidecar: State<'_, SharedSidecar>,
@@ -668,53 +161,7 @@ async fn sidecar_list_partitions(
     }
 }
 
-/// Render a thumbnail for a carved image at a byte offset.
-#[tauri::command]
-async fn sidecar_thumbnail(
-    sidecar: State<'_, SharedSidecar>,
-    image_path: String,
-    offset: u64,
-    out_path: String,
-) -> Result<serde_json::Value, String> {
-    let mut guard = sidecar.lock().await;
-    if let Some(ref mut sc) = *guard {
-        sc.carve_thumbnail(&image_path, offset, &out_path)
-            .await
-            .map_err(|e| e.to_string())
-    } else {
-        Err("Forensic sidecar is not available (Python/sidecar missing)".into())
-    }
-}
-
-/// Integrity Gate: strict structural check for carved files.
-/// MP4 → mp4.rs gate; baaki files carver signature already matched.
-#[tauri::command]
-async fn verify_carved_file(app: AppHandle, path: String) -> Result<bool, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-        // Extension ke hisaab se gate — mp4 ka strict parser, baaki signature check
-        let ok = if path.ends_with(".mp4") {
-            clockverse_engine::mp4::validate(&data).playable_estimate()
-        } else {
-            true // JPEG/PNG/PDF: carver signature already matched
-        };
-        if ok {
-            // Crystal pe TEAL — Integrity Gate pass (state_code=2)
-            let _ = app.emit(
-                "engine",
-                EngineEvent::FileVerified {
-                    path: path.clone(),
-                    sha256: String::new(), // Phase 2.5: sidecar verify_file hook
-                },
-            );
-        }
-        Ok(ok)
-    })
-    .await
-    .map_err(|e| e.to_string())?
-}
-
-/// Open a file or folder in Windows File Explorer
+/// Open the directory containing a saved result.
 #[tauri::command]
 async fn open_in_explorer(path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -755,7 +202,7 @@ async fn select_image_file() -> Result<Option<String>, String> {
             Add-Type -AssemblyName System.Windows.Forms
             $f = New-Object System.Windows.Forms.OpenFileDialog
             $f.Title = "Select File or Disk Image to Scan"
-            $f.Filter = "All Files (*.*)|*.*|Disk Images (*.dd;*.img;*.raw;*.iso;*.vhd;*.E01)|*.dd;*.img;*.raw;*.iso;*.vhd;*.E01|Media & Documents (*.jpg;*.png;*.pdf;*.zip;*.mp4)|*.jpg;*.png;*.pdf;*.zip;*.mp4"
+            $f.Filter = "All Files (*.*)|*.*|Raw Disk Images (*.dd;*.img;*.raw)|*.dd;*.img;*.raw|Media & Documents (*.jpg;*.png;*.pdf;*.zip;*.mp4)|*.jpg;*.png;*.pdf;*.zip;*.mp4"
             $f.FilterIndex = 1
             if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
                 Write-Output $f.FileName
@@ -782,31 +229,64 @@ async fn select_image_file() -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
-
 #[tauri::command]
 async fn time_capsule_protect(
+    app: AppHandle,
+    session: State<'_, RecoveryState>,
     state: State<'_, AppState>,
     path: String,
     name: String,
 ) -> Result<ProtectedFolder, String> {
-    let mut capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
-    capsule.protect_folder(path, name).map_err(|e| e.to_string())
+    let guard = session.begin()?;
+    let cancel = Arc::clone(&session.cancel);
+    let shared = Arc::clone(&state.time_capsule);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        shared
+            .lock()
+            .map_err(|e| e.to_string())?
+            .protect_controlled(path, name, &cancel, |p| {
+                let _ = app.emit("snapshot-progress", p);
+            })
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 async fn time_capsule_snapshot(
+    app: AppHandle,
+    session: State<'_, RecoveryState>,
     state: State<'_, AppState>,
     folder_path: String,
 ) -> Result<u64, String> {
-    let mut capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
-    let snap = capsule.snapshot_folder(&folder_path).map_err(|e| e.to_string())?;
-    Ok(snap.created_at)
+    let guard = session.begin()?;
+    let cancel = Arc::clone(&session.cancel);
+    let shared = Arc::clone(&state.time_capsule);
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        shared
+            .lock()
+            .map_err(|e| e.to_string())?
+            .snapshot_controlled(&folder_path, &cancel, |p| {
+                let _ = app.emit("snapshot-progress", p);
+            })
+            .map(|s| s.created_at)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 async fn time_capsule_list(state: State<'_, AppState>) -> Result<Vec<ProtectedFolder>, String> {
-    let capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
-    Ok(capsule.folders.clone())
+    let shared = Arc::clone(&state.time_capsule);
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(shared.lock().map_err(|e| e.to_string())?.folders.clone())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -814,18 +294,15 @@ async fn time_capsule_history(
     state: State<'_, AppState>,
     folder_path: String,
 ) -> Result<Vec<clockverse_engine::timesnap::Snapshot>, String> {
-    let capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
-    Ok(capsule.list_snapshots(&folder_path))
-}
-
-#[tauri::command]
-async fn time_capsule_rollback(
-    state: State<'_, AppState>,
-    folder_path: String,
-    snapshot_id: String,
-) -> Result<u32, String> {
-    let capsule = state.time_capsule.lock().map_err(|e| e.to_string())?;
-    capsule.rollback_folder(&folder_path, &snapshot_id).map_err(|e| e.to_string())
+    let shared = Arc::clone(&state.time_capsule);
+    tauri::async_runtime::spawn_blocking(move || {
+        Ok(shared
+            .lock()
+            .map_err(|e| e.to_string())?
+            .list_snapshots(&folder_path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -863,75 +340,6 @@ async fn select_folder() -> Result<Option<String>, String> {
     .map_err(|e| e.to_string())?
 }
 
-
-const DEFAULT_SUPABASE_URL: &str = "https://hdjedvcyzrzrryvddsat.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.dummy";
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LicenseStatus {
-    pub valid: bool,
-    pub tier: Option<String>,
-    pub activated: bool,
-    pub error: Option<String>,
-    pub expires_at: Option<String>,
-}
-
-#[tauri::command]
-async fn validate_license(key: String) -> Result<LicenseStatus, String> {
-    let machine_id = machine_uid::get().unwrap_or_else(|_| "generic-machine-id".to_string());
-    let supabase_url = std::env::var("CLOCKVERSE_SUPABASE_URL")
-        .unwrap_or_else(|_| DEFAULT_SUPABASE_URL.to_string());
-    let supabase_key = std::env::var("CLOCKVERSE_SUPABASE_KEY")
-        .unwrap_or_else(|_| DEFAULT_SUPABASE_ANON_KEY.to_string());
-
-    let client = Client::new();
-    let res = client
-        .post(format!("{}/functions/v1/validate-license", supabase_url))
-        .header("Authorization", format!("Bearer {}", supabase_key))
-        .header("Content-Type", "application/json")
-        .json(&json!({
-            "license_key": key,
-            "machine_id": machine_id
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("Network request failed: {}", e))?;
-
-    let status: LicenseStatus = res
-        .json()
-        .await
-        .map_err(|e| format!("Invalid JSON response: {}", e))?;
-    Ok(status)
-}
-
-#[tauri::command]
-async fn activate_license(key: String) -> Result<LicenseStatus, String> {
-    let status = validate_license(key).await?;
-    if status.valid && status.activated {
-        let mut config = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        config.push("clockverse");
-        std::fs::create_dir_all(&config).ok();
-        config.push("license.json");
-        std::fs::write(config, serde_json::to_string_pretty(&status).unwrap())
-            .map_err(|e| e.to_string())?;
-        Ok(status)
-    } else {
-        Err(status.error.unwrap_or_else(|| "License activation failed".to_string()))
-    }
-}
-
-#[tauri::command]
-async fn check_license_grace() -> Result<LicenseStatus, String> {
-    // Unlocked Community Pro Edition: 100% working features enabled
-    Ok(LicenseStatus {
-        valid: true,
-        tier: Some("pro".to_string()),
-        activated: true,
-        error: None,
-        expires_at: None,
-    })
-}
-
 fn main() {
     // Problem #1 fix: Persistent DB with env override for tests
     let db_path = std::env::var("CLOCKVERSE_DB")
@@ -967,7 +375,11 @@ fn main() {
         std::path::PathBuf::from("sidecar/sidecar.py"),
     ];
 
-    let sidecar_path = candidates.into_iter().find(|p| p.exists());
+    let sidecar_path = if std::env::var("CLOCKVERSE_ENABLE_SIDECAR").as_deref() == Ok("1") {
+        candidates.into_iter().find(|p| p.exists())
+    } else {
+        None
+    };
 
     // Python executable detection (Windows vs Unix)
     let python_cmd = if cfg!(windows) { "python" } else { "python3" };
@@ -980,80 +392,179 @@ fn main() {
                     Some(s)
                 }
                 Err(e) => {
-                    eprintln!("[WARN] Forensic sidecar unavailable: {}. Running without sidecar.", e);
+                    eprintln!(
+                        "[WARN] Forensic sidecar unavailable: {}. Running without sidecar.",
+                        e
+                    );
                     None
                 }
             }
         })
     } else {
-        eprintln!("[WARN] sidecar.py not found in any candidate path. Running in standalone native mode.");
+        eprintln!(
+            "[WARN] sidecar.py not found in any candidate path. Running in standalone native mode."
+        );
         None
     };
 
-    let time_capsule = Arc::new(StdMutex::new(TimeCapsule::new()));
+    let snapshot_config = dirs::data_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("clockverse/snapshot-location.json");
+    let capsule = match std::fs::read(&snapshot_config) {
+        Ok(bytes) => match serde_json::from_slice::<std::path::PathBuf>(&bytes) {
+            Ok(path) if path.is_dir() => TimeCapsule::with_storage(path),
+            _ => TimeCapsule::unavailable(snapshot_config.clone(), "Configured backup location is missing or invalid. Reconnect the drive or open an existing backup.".into()),
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => TimeCapsule::new(),
+        Err(e) => TimeCapsule::unavailable(snapshot_config.clone(), e.to_string()),
+    };
+    let time_capsule = Arc::new(StdMutex::new(capsule));
 
-    // Background Time Capsule Auto-Snapshot Daemon (Runs every 10 minutes)
+    let recovery_state = RecoveryState::default();
+    let scanning_flag = Arc::clone(&recovery_state.active);
+    let daemon_cancel = Arc::clone(&recovery_state.cancel);
+    // Check configured schedules every minute; defer background I/O during recovery.
     let capsule_daemon = Arc::clone(&time_capsule);
     tauri::async_runtime::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(600));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await; // Do not immediately duplicate startup snapshots.
         loop {
             interval.tick().await;
-            let active_folders: Vec<String> = {
-                if let Ok(c) = capsule_daemon.lock() {
-                    c.folders.iter()
-                        .filter(|f| f.status == CapsuleStatus::Active)
+            if scanning_flag
+                .compare_exchange(
+                    false,
+                    true,
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                )
+                .is_err()
+            {
+                continue;
+            }
+            let guard = ActiveGuard(Arc::clone(&scanning_flag));
+            daemon_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+            let cancel = Arc::clone(&daemon_cancel);
+            let shared = Arc::clone(&capsule_daemon);
+            if let Err(error) = tauri::async_runtime::spawn_blocking(move || {
+                let _guard = guard;
+                if let Ok(mut capsule) = shared.lock() {
+                    let folders: Vec<String> = capsule
+                        .folders
+                        .iter()
+                        .filter(|f| {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_micros() as u64;
+                            f.status != CapsuleStatus::Paused
+                                && now
+                                    .saturating_sub(f.last_attempt.or(f.last_snapshot).unwrap_or(0))
+                                    >= capsule.policy.interval_minutes.saturating_mul(60_000_000)
+                        })
                         .map(|f| f.path.clone())
-                        .collect()
-                } else {
-                    Vec::new()
-                }
-            };
-
-            for folder in active_folders {
-                if let Ok(mut c) = capsule_daemon.lock() {
-                    if let Err(e) = c.snapshot_folder(&folder) {
-                        eprintln!("[TimeCapsule] Background snapshot error for {}: {}", folder, e);
-                    } else {
-                        println!("[TimeCapsule] Auto-snapshot completed for {}", folder);
+                        .collect();
+                    for folder in folders {
+                        if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+                        if let Err(error) = capsule.snapshot_controlled(&folder, &cancel, |_| {}) {
+                            if let Some(record) =
+                                capsule.folders.iter_mut().find(|f| f.path == folder)
+                            {
+                                record.status = CapsuleStatus::Error(error.to_string());
+                            }
+                            if let Err(error) = capsule.save_folders() {
+                                eprintln!("[TimeCapsule] Cannot persist status: {}", error);
+                            }
+                            eprintln!("[TimeCapsule] {}: {}", folder, error);
+                        }
                     }
                 }
+            })
+            .await
+            {
+                eprintln!("[TimeCapsule] Worker failed: {}", error);
             }
         }
     });
 
     tauri::Builder::default()
+        .manage(recovery_state)
         .manage(AppState {
             index: Arc::new(StdMutex::new(index)),
             time_capsule: Arc::clone(&time_capsule),
+            snapshot_config,
         })
         .manage(Arc::new(TokioMutex::new(sidecar)) as SharedSidecar)
         .invoke_handler(tauri::generate_handler![
-            start_scan,
-            vss_scan_folder,
-            trim_health_check,
+            recovery_scan,
+            recovery_cancel,
+            recovery_search,
+            recovery_preview,
+            capsule_policy,
+            capsule_pause,
+            capsule_export,
+            capsule_maintenance,
+            capsule_location,
+            capsule_estimate,
             chrono_ingest,
             session_summary,
             chrono_time_travel,
-            scan_deleted_files,
-            extract_deleted_file,
-            verify_carved_file,
             sidecar_list_partitions,
-            sidecar_thumbnail,
             get_temp_dir,
             open_in_explorer,
             select_image_file,
             create_demo_platter,
-            restore_file_to_disk,
             time_capsule_protect,
             time_capsule_snapshot,
             time_capsule_list,
             time_capsule_history,
-            time_capsule_rollback,
             select_folder,
-            validate_license,
-            activate_license,
-            check_license_grace
+            list_system_drives,
+            check_admin_privileges,
+            vss_create,
+            vss_list,
+            vss_restore,
+            ssd_mine_shadows,
+            ssd_restore_mined_file,
+            relaunch_as_admin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ClockVerse");
+}
+#[cfg(test)]
+mod native_tests {
+    #[tokio::test]
+    async fn demo_image_recovers_real_png_and_pdf() {
+        let path = super::create_demo_platter().await.unwrap();
+        let out = std::env::temp_dir().join(format!("clockverse_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&out).unwrap();
+        let report = clockverse_engine::recovery::run(
+            std::path::Path::new(&path),
+            &out,
+            "",
+            &std::sync::atomic::AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        assert!(!report.partial);
+        assert_eq!(report.files.len(), 2);
+        let png = report.files.iter().find(|f| f.extension == "png").unwrap();
+        assert_eq!(
+            std::fs::read(&png.path).unwrap(),
+            include_bytes!("../assets/sample.png")
+        );
+        let pdf = report.files.iter().find(|f| f.extension == "pdf").unwrap();
+        assert!(std::fs::read(&pdf.path).unwrap().ends_with(b"%%EOF"));
+        // Only explicitly created test files and their isolated UUID directory are removed.
+        std::fs::remove_file(&path).unwrap();
+        for file in &report.files {
+            std::fs::remove_file(&file.path).unwrap();
+        }
+        std::fs::remove_file(std::path::Path::new(&report.output_dir).join("recovery-report.json"))
+            .unwrap();
+        std::fs::remove_dir(&report.output_dir).unwrap();
+        std::fs::remove_dir(&out).unwrap();
+    }
 }

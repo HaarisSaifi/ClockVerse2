@@ -50,6 +50,7 @@ export async function onEngineEvent(handler) {
     return await tauri.event.listen('engine', (e) => handler(e.payload));
   }
 
+  if (new URLSearchParams(window.location.search).get("demo") !== "1") return () => {};
   // Browser dev mode: hold reference to handler for mock invoke triggers
   mockEmitter = handler;
 
@@ -74,7 +75,10 @@ export async function invoke(cmd, args) {
   const tauri = getTauri();
   const invokeFn = tauri?.core?.invoke || tauri?.invoke;
   if (invokeFn) return invokeFn(cmd, args);
-  console.log('[mock invoke]', cmd, args);
+  if (new URLSearchParams(window.location.search).get('demo') !== '1') {
+    throw new Error('Recovery requires the ClockVerse desktop app. Browser simulation is available only with ?demo=1.');
+  }
+  console.log('[demo invoke]', cmd, args);
 
   if (cmd === 'start_scan' && mockEmitter) {
     mockEmitter({ type: 'scan_started', target: args.target || 'Disk0', total_sectors: 500000 });

@@ -1,24 +1,17 @@
 [package]
 name = "clockverse"
-version = "0.1.0"
+version = "2.0.0"
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
 dirs = "5"
 clockverse-engine = { path = "../engine" }
-reqwest = { version = "0.12", features = ["json"] }
-machine-uid = "0.5"
-chrono = { version = "0.4", features = ["serde"] }
-
-
-[profile.release]
-opt-level = 2
-codegen-units = 8
-lto = false
